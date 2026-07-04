@@ -56,32 +56,39 @@ CHANNEL_LAYERS = {
 }
 ```
 
-### 1-2. 배포 — Render (무료 티어)
+### 1-2. 배포 — KCLOUD VM + systemd
 
-Render는 매니지드 PaaS라 systemd/Docker를 직접 설정할 필요가 없다. Render 대시보드에서 아래 세 가지를 만들고 서로 연결한다.
+몰입캠프가 제공하는 KCLOUD(카이스트 자체 클라우드) VM 한 대에 직접 배포한다. 순서:
 
-| 리소스 | 설정 |
-|---|---|
-| Web Service | Runtime: Python 3 / Build: `pip install -r requirements.txt` / Start: `daphne -b 0.0.0.0 -p $PORT config.asgi:application` |
-| PostgreSQL | 무료 티어 인스턴스 생성 → Render가 자동으로 `DATABASE_URL` 환경변수를 Web Service에 주입 |
-| Key Value (Redis) | 무료 티어 인스턴스 생성 → 내부 연결 문자열을 Web Service 환경변수(`REDIS_URL` 등, 정확한 이름은 Render 대시보드에서 확인)로 등록 |
-
-```python
-# settings.py — 환경변수 기반으로 변경
-import dj_database_url
-
-DATABASES = {"default": dj_database_url.config(default=os.environ["DATABASE_URL"])}
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [os.environ["REDIS_URL"]]},
-    }
-}
+```
+1. VM 발급받고 SSH 접속 (공인 IP 확인)
+2. Docker 설치 → §1-1의 docker-compose.yml로 Postgres·Redis 컨테이너 실행
+3. Python/venv 설치 → 레포 클론 → .env에 운영용 DB/Redis 접속정보 설정
+4. 아래 systemd 유닛 등록 → Django Channels 워커를 상시 프로세스로 구동
+5. 방화벽에서 앱 포트(예: 8000) 개방
+6. Cloudflare에서 캠프 도메인의 서브도메인을 신청하고, A 레코드를 VM 공인 IP로 연결
+   (Cloudflare 프록시 On 상태로 두면 HTTPS와 WebSocket 통과를 Cloudflare가 처리 — VM에 별도 인증서 설정 불필요)
 ```
 
-**커스텀 도메인**: Render 대시보드에서 캠프 측이 제공한 도메인을 Custom Domain으로 등록 → Cloudflare에서 해당 도메인의 CNAME을 Render가 안내하는 `*.onrender.com` 호스트로 설정 (WebSocket은 Cloudflare 프록시를 통과하므로 별도 설정 불필요).
+```ini
+# /etc/systemd/system/codebee.service (배포 VM, 예시)
+[Unit]
+Description=codebee Django Channels worker
+After=network.target docker.service
 
-**콜드스타트 대응**: 무료 Web Service는 15분 미사용 시 슬립된다. 발표 직전 미리 한 번 URL에 접속해 깨워둔다.
+[Service]
+WorkingDirectory=/opt/codebee
+ExecStart=/opt/codebee/.venv/bin/daphne -b 0.0.0.0 -p 8000 config.asgi:application
+Restart=always
+EnvironmentFile=/opt/codebee/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Django 연결 설정은 §1-1의 `DATABASES`/`CHANNEL_LAYERS`와 동일하되, `HOST`가 `localhost`인 것만 유지하면 된다 (Postgres·Redis 컨테이너가 같은 VM에서 포트로 열려 있으므로).
+
+**비용**: KCLOUD VM과 서브도메인 모두 캠프에서 무료로 제공 — 별도 비용 없음. Render 검토 당시 고민했던 콜드스타트/Postgres 30일 만료/Redis 용량 제한도 해당 없음(우리가 직접 관리하는 상시 VM이므로).
 
 ## 2. DB 모델 정의
 

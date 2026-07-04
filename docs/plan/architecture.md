@@ -33,33 +33,33 @@
      유저 A                                   유저 B
 ```
 
-- 그림의 "프로세스 1", "프로세스 2"는 Channels ASGI 워커 프로세스를 뜻한다. 물리적으로 다른 머신일 필요는 없다 — 로컬 개발에서는 한 머신 위에 워커 프로세스를 여러 개 띄워 이 구조를 직접 재현할 수 있고, §3의 실제 배포(Render 무료 티어)는 인스턴스 1개로 운영한다. 인스턴스가 1개든 여러 개든 §8의 "프로세스 토폴로지 무관성" 논리는 동일하게 성립한다
+- 그림의 "프로세스 1", "프로세스 2"는 Channels ASGI 워커 프로세스를 뜻한다. 물리적으로 다른 머신일 필요는 없다 — §3의 실제 계획은 VM(KCLOUD) **한 대** 위에 이런 프로세스를 여러 개 띄우는 구조다
 
 ## 3. 배포 토폴로지
 
 | 환경 | 구성 |
 |---|---|
 | 로컬 개발 | Django Channels 워커 프로세스 여러 개(native) + Redis·Postgres(Docker) |
-| 배포 | Render (PaaS) — Web Service(Django Channels) + PostgreSQL(무료 티어) + Key Value/Redis(무료 티어), 커스텀 도메인은 Cloudflare로 DNS 연결(WebSocket 통과 가능) |
+| 배포 | VM(KCLOUD, 몰입캠프 제공) 위에 Channels 워커 여러 개(native, systemd로 관리) + Postgres·Redis(같은 VM, Docker), 앞단은 Cloudflare(DNS/프록시, WebSocket 통과 가능) |
 
 [사용자]
     ↓
-[Cloudflare] ← DNS(캠프 측 무료 도메인), CNAME → Render 기본 도메인
+[Cloudflare] ← DNS(캠프 도메인의 서브도메인, 무료 신청) + 프록시 + WebSocket 통과
     ↓
-[Render Web Service] ── Django Channels 워커 (Render가 프로세스 관리)
-    ├── Render PostgreSQL (무료 티어, 관리형)
-    └── Render Key Value (Redis 호환, 무료 티어, 관리형)
+[KCLOUD VM (한 대)]
+    ├── Channels 워커 프로세스 여러 개 (systemd가 관리)
+    ├── Postgres (Docker 컨테이너)
+    └── Redis (Docker 컨테이너)
 
-**비용을 최우선으로 두고 Render 무료 티어로 결정** ([docs/research/deployment-hosting.md](../research/deployment-hosting.md) 참고). Hetzner(~월 5-6천원, 상시구동)도 검토했으나, 비용 $0이 최우선 순위라 콜드스타트 트레이드오프를 감수하기로 함.
+**Render 대신 KCLOUD VM으로 결정** ([docs/research/deployment-hosting.md](../research/deployment-hosting.md) 참고). 이유는 두 가지: (1) 가상 머신을 직접 다뤄보는 경험 자체가 목적, (2) KCLOUD(카이스트 제공)와 서브도메인이 캠프 측에서 이미 무료로 제공되어, Render를 검토했던 원래 이유(비용 $0)도 VM 방식에서 그대로 달성된다 — 그러면서 Render의 콜드스타트/Postgres 30일 만료/Redis 용량 제한 같은 트레이드오프도 없음.
 
-Render는 매니지드 PaaS라 Postgres·Redis를 우리가 Docker로 직접 띄울 필요가 없다 — Render 대시보드에서 각각 인스턴스를 만들고 Web Service에 연결만 하면 된다. 로컬 개발 환경(Docker Compose)은 그대로 유지한다(§3-1).
+**Django(Channels 워커)는 Docker에 넣지 않는다.** Postgres·Redis만 컨테이너화하고, Django는 VM에서 native 프로세스로 띄운다(systemd로 관리). 이유:
 
-**감수해야 하는 트레이드오프:**
-- **콜드스타트**: 무료 Web Service는 15분 미사용 시 슬립, 재기동에 ~1분 소요 — 발표 직전엔 미리 한 번 접속해서 깨워둬야 함
-- **Postgres 30일 만료**: 무료 Postgres는 생성 30일 후 삭제됨 — 1주짜리 프로젝트 기간엔 문제없지만, 데모 이후에도 데이터를 보존하려면 그 전에 백업/업그레이드 필요
-- **Redis 용량/비영속성**: 무료 Key Value는 25MB/커넥션 50개, 재시작 시 데이터가 사라짐 — 다만 이 프로젝트의 Redis 키는 원래 라운드 종료 시 정리되는 휘발성 상태([백엔드 구현 상세](./backend-implementation.md) §3, §6)라 실질적 영향은 적음
+- Docker로 DB류를 묶은 건 "팀원 OS(macOS/Windows)가 달라 Postgres 설치 방법이 갈린다"는 로컬 개발 문제 때문 — Django는 이 문제와 무관
+- 코드 수정 → 확인까지의 반복 개발 루프가 이미지 재빌드 없이 프로세스 재시작만으로 끝나 훨씬 빠름 (짧은 기간에 빠르게 반복하는 프로젝트에 유리)
+- Channels 워커를 여러 개 띄우는 구조(§2, [백엔드 구현 상세](./backend-implementation.md) §4)는 systemd 유닛으로 충분히 관리 가능 — 굳이 Docker의 `--scale`이 필요한 규모가 아님
 
-배포 설정(Web Service 빌드/시작 명령, 환경변수 연결) 전문은 [백엔드 구현 상세](./backend-implementation.md) §1 참고.
+배포 설정(`docker-compose.yml`, systemd 유닛, Cloudflare 서브도메인 연결) 전문은 [백엔드 구현 상세](./backend-implementation.md) §1 참고.
 
 ## 4. 데이터베이스: PostgreSQL
 

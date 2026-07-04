@@ -23,10 +23,10 @@ Day 1                          Day 2              Day 3           Day 4
 ## Day 1 — 셋업 + 데이터 모델 + 인증 + 방 입장 + WebSocket 골격
 
 **백엔드**
-- [ ] Django 프로젝트 초기화, Channels(ASGI) 설정
-- [ ] `docker-compose.yml`로 로컬 Postgres·Redis 실행 ([backend-implementation.md](./backend-implementation.md) §1-1)
-- [ ] DB 모델 구현 + migration: `Profile`, `Room`, `CodeSnippet`, `GameResult` (§2)
-- [ ] 회원가입/로그인 (Django 기본 auth 활용, 중복 아이디 검사, 비밀번호 정책 없음 — README 필수 기능)
+- [👍] Django 프로젝트 초기화, Channels(ASGI) 설정
+- [😁] `docker-compose.yml`로 로컬 Postgres·Redis 실행 ([backend-implementation.md](./backend-implementation.md) §1-1)
+- [💪] DB 모델 구현 + migration: `Profile`, `Room`, `CodeSnippet`, `GameResult` (§2)
+- [👍] 회원가입/로그인 (Django 기본 auth 활용, 중복 아이디 검사, 비밀번호 정책 없음 — README 필수 기능)
 - [ ] `CodeSnippet` 시드 데이터 준비 (정답/오답 코드 텍스트 풀, `text` unique 제약 감안해서 중복 없이 준비)
 - [ ] 방 생성/참가 API (초대 코드 발급, `Room.player1`/`player2` 슬롯 채움, 정원 2명 검증)
 - [ ] 방 안 유저 목록 표시용 데이터, "game start" 트리거 (호스트만 시작 가능)
@@ -36,6 +36,7 @@ Day 1                          Day 2              Day 3           Day 4
 
 **프론트엔드**
 - [ ] Vite + React 프로젝트 셋업, `/api`·`/ws` 프록시 설정
+- [ ] API 호출할 때 마다 쿠키에서 토큰을 읽어오는 공용 함수를 만들기. 
 - [ ] 회원가입/로그인 화면 (폼, 에러 메시지 표시 — 중복 아이디 등)
 - [ ] 로비 화면: 방 생성/참가(코드 입력), 방 안 유저 목록, "game start" 버튼(호스트에게만 노출)
 - [ ] WebSocket 연결: 방 접속 시 WS 오픈, 유저 목록/게임 시작 이벤트 수신 처리

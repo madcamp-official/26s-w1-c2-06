@@ -66,3 +66,19 @@ docker compose down   # Postgres·Redis 종료 (볼륨은 유지, 데이터 안 
 
 - 배포 시 실행 순서/구성은 다르다 — [backend-implementation.md](./backend-implementation.md) §1-2 (KCLOUD VM + systemd + Cloudflare) 참고. 배포 후엔 Vite 서버가 따로 없고, 빌드된 프론트 정적 파일을 Django가 직접 서빙한다.
 - 서버별 역할: Django = API + WebSocket (+ 배포 시엔 정적 프론트까지), Vite = 개발 중 프론트 HMR 전용 (배포엔 관여 안 함)
+
+## 브랜치 구조
+
+4일짜리 2인 프로젝트라 무겁게 안 간다. 이미 있는 `main`/`develop` 위에 개인별 브랜치만 얹는다.
+
+```
+main         ← 항상 배포 가능한 상태 (KCLOUD VM에 실제 떠 있는 버전과 동기화)
+develop      ← 팀 통합 브랜치, 매일 여기로 merge
+feature/sy   ← 각자 작업 브랜치 (이니셜 기준, 기능별로 안 쪼갬)
+feature/dh
+```
+
+- **기능별로 안 쪼개고 사람별로 나누는 이유**: 이 규모(4일, 2인)에선 브랜치 이름보다 **merge 빈도**가 중요하다. 기능 단위로 쪼개봤자 어차피 하루 안에 여러 기능을 오가며 작업하게 됨
+- **원칙**: `feature/sy`, `feature/dh`를 하루 넘게 들고 있지 않는다 — 체크리스트 항목 하나 끝날 때마다, 늦어도 하루에 한 번은 `develop`으로 merge. Day 2 작업(스폰/판정)은 Day 1의 모델·Consumer가 `develop`에 실제로 들어와 있어야 그 위에서 동작하므로, merge가 늦어지면 다음날 상대방이 막힘
+- **merge 방식**: PR 만들고 본인이 바로 merge해도 무방 (형식적 승인 절차 불필요, 히스토리 남기는 용도)
+- **`main` 갱신 시점**: Day 3(통합 QA) 끝나고 안정된 시점에 `develop → main` merge, 그 상태로 Day 4에 KCLOUD VM 배포. 배포 중 버그 발견 시 `main`에 바로 고치고 `develop`에도 다시 merge해서 벌어지지 않게 유지

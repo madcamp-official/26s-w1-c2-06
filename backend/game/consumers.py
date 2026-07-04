@@ -1,4 +1,7 @@
+import asyncio
+import contextlib
 import json
+import random
 import time
 
 from channels.db import database_sync_to_async
@@ -7,8 +10,10 @@ from django.utils import timezone
 
 from .models import Room
 from .redis_client import get_redis
+from .snippet_cache import clear_snippet_pool, get_snippet_pool
 
 GAME_DURATION_MS = 60000
+SPAWN_TICK_MS = 500
 
 
 class GameConsumer(AsyncWebsocketConsumer):
@@ -32,6 +37,12 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         if not hasattr(self, "room_group_name"):
             return
+
+        spawn_task = getattr(self, "_spawn_task", None)
+        if spawn_task is not None:
+            spawn_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await spawn_task
 
         await self._handle_waiting_leave()
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
@@ -84,6 +95,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             else:
                 room.status = "finished"
                 room.save(update_fields=["status"])
+                clear_snippet_pool(self.room_code)
         elif room.player2_id == self.user.id:
             room.player2_id = None
             room.save(update_fields=["player2"])
@@ -126,6 +138,59 @@ class GameConsumer(AsyncWebsocketConsumer):
     def _set_room_playing(self):
         Room.objects.filter(code=self.room_code).update(status="playing", started_at=timezone.now())
 
+    # --- 스폰 틱 로직 (§4, "스폰도 선점 문제") ---
+
+    async def _spawn_tick_loop(self, started_at, duration_ms):
+        last_tick = -1
+        while True:
+            await asyncio.sleep(0.1)  # tick 경계를 놓치지 않도록 짧게 자주 깨어남
+            now_ms = int(time.time() * 1000)
+            elapsed = now_ms - started_at
+            if elapsed >= duration_ms:
+                break  # 60초 경과 — 종료 처리는 별도 작업에서 구현
+
+            tick = elapsed // SPAWN_TICK_MS
+            if tick != last_tick:
+                last_tick = tick
+                await self._try_spawn(tick)
+
+    async def _try_spawn(self, tick):
+        r = get_redis()
+        acquired = await r.set(
+            f"spawn_lock:{self.room_code}:{tick}", self.channel_name, nx=True, ex=5
+        )
+        if not acquired:
+            return  # 이미 다른 프로세스(연결)가 이번 틱을 처리함
+
+        pool = await get_snippet_pool(self.room_code)
+        if not pool:
+            return
+
+        snippet = None
+        for _ in range(10):
+            candidate = random.choice(pool)
+            added = await r.sadd(f"used_snippet_ids:{self.room_code}", candidate["id"])
+            if added:
+                snippet = candidate
+                break
+        if snippet is None:
+            return  # 후보를 10번 뽑아도 전부 중복 — 이번 틱은 스킵 (풀 소진에 가까움)
+
+        code_id = str(snippet["id"])
+        value = f"{snippet['text']}|{'1' if snippet['is_correct'] else '0'}"
+        await r.hset(f"codes:{self.room_code}", code_id, value)
+        await r.hset(f"text_index:{self.room_code}", snippet["text"], code_id)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "code.spawn",
+                "code_id": code_id,
+                "text": snippet["text"],
+                "spawn_ts": int(time.time() * 1000),
+            },
+        )
+
     # --- group_send 브로드캐스트 수신 핸들러 ---
 
     async def game_start(self, event):
@@ -133,6 +198,17 @@ class GameConsumer(AsyncWebsocketConsumer):
             "type": "game.start",
             "started_at": event["started_at"],
             "duration": event["duration"],
+        })
+        self._spawn_task = asyncio.create_task(
+            self._spawn_tick_loop(event["started_at"], event["duration"])
+        )
+
+    async def code_spawn(self, event):
+        await self._send_json({
+            "type": "code.spawn",
+            "code_id": event["code_id"],
+            "text": event["text"],
+            "spawn_ts": event["spawn_ts"],
         })
 
     async def room_update(self, event):

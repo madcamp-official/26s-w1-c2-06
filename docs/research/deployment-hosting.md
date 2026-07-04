@@ -31,9 +31,14 @@
 
 **AWS EC2는 굳이 고를 이유가 약함** — 무료 기간은 매력적이지만 신규 계정에서만 적용되고, 끝난 뒤엔 Hetzner/DigitalOcean보다 비싸며 부가 비용(데이터 전송, 미연결 EIP 등)으로 예상 밖 청구서가 나올 위험이 학생 프로젝트엔 더 크다. 팀에 이미 AWS 크레딧(교육 프로그램 등)이 있는 경우가 아니라면 우선순위가 낮다.
 
-## 결정 — Render 무료 티어
+## 결정 — KCLOUD VM (몰입캠프 제공)
 
-비용 $0이 최우선 순위라 **Render 무료 티어로 확정**했다. 캠프 측에서 도메인을 무료로 제공해 실제 배포 URL로 데모하게 됐지만, Render 무료 티어도 커스텀 도메인을 지원하므로(무료 2개까지) 이 결정에 영향을 주지 않는다. 콜드스타트(15분 미사용 시 슬립, 재기동 ~1분)는 발표 직전 미리 접속해 깨워두는 것으로 감수한다. [docs/plan/architecture.md](../plan/architecture.md) §3, [docs/plan/backend-implementation.md](../plan/backend-implementation.md) §1에 반영함.
+Render 무료 티어를 1차로 확정했었으나, 이후 두 가지가 바뀌어 **KCLOUD(카이스트 제공) VM + Cloudflare로 최종 변경**했다:
+
+1. 가상 머신을 직접 다뤄보는 경험 자체가 팀의 목표로 확인됨 — Render(PaaS)는 애초에 VM 관리가 필요 없게 만드는 서비스라 이 목표와 상충
+2. 몰입캠프 측에서 KCLOUD VM과 도메인 서브도메인을 **무료로 제공**한다는 게 확인됨 — 원래 Render를 택한 이유(비용 $0)가 VM 방식에서도 그대로 달성되고, 오히려 Render의 콜드스타트/Postgres 30일 만료/Redis 용량 제한 같은 트레이드오프가 전부 없어짐
+
+이 프로젝트 한정으로는 비교표의 다른 상용 클라우드(AWS/Hetzner/DigitalOcean/Fly.io)도 전부 후보에서 제외된다 — 캠프가 이미 VM과 도메인을 무료로 주기 때문에 비용 비교 자체가 무의미해짐. [docs/plan/architecture.md](../plan/architecture.md) §3, [docs/plan/backend-implementation.md](../plan/backend-implementation.md) §1에 반영함.
 
 ## 참고 자료
 
@@ -41,7 +46,6 @@
 - [Pricing · Fly](https://fly.io/pricing/)
 - [Pricing | Render](https://render.com/pricing)
 - [Deploy for Free – Render Docs](https://render.com/docs/free)
-- [Platforms with a real free tier for developers in 2026 - Render](https://render.com/articles/platforms-with-a-real-free-tier-for-developers-in-2026)
 - [Hetzner Cloud VPS Pricing Calculator (Jul 2026)](https://costgoat.com/pricing/hetzner)
 - [Droplet Pricing | DigitalOcean](https://www.digitalocean.com/pricing/droplets)
 - [Redis Pricing - Upstash](https://upstash.com/pricing/redis)

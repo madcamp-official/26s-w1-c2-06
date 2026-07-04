@@ -42,7 +42,18 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         if msg_type == "game.start":
             await self._handle_game_start()
-        # clock.sync, submit 등은 이어서 추가
+        elif msg_type == "clock.sync":
+            await self._handle_clock_sync(data)
+        # submit 등은 Day 2에서 추가
+
+    # --- 클럭 동기화 (§9, stateless — 상태 저장 없이 즉시 응답만) ---
+
+    async def _handle_clock_sync(self, data):
+        await self._send_json({
+            "type": "clock.sync.reply",
+            "client_sent_at": data.get("client_sent_at"),
+            "server_time": int(time.time() * 1000),
+        })
 
     # --- 방 생명주기 (§7 전반부 — 대기 중 이탈) ---
 

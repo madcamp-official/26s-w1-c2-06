@@ -272,6 +272,7 @@ SET game_started_at:{room} <now_ms> NX
           if created:
               Profile.objects.filter(user_id=u1).update(total_score=F("total_score") + scores[u1])
               Profile.objects.filter(user_id=u2).update(total_score=F("total_score") + scores[u2])
+              Room.objects.filter(id=room_id).update(status="finished", ended_at=timezone.now())
 
    d. group_send(room_group, {type: "game.over", scores: {...}, winner_id: winner_id})
       → 두 유저 화면에 "게임 종료 + 최종 점수 + 승자" 반영 (다른 프로세스에 있어도 architecture.md §5와 동일하게 전파)
@@ -287,6 +288,7 @@ SET game_started_at:{room} <now_ms> NX
 - **정확히 한 번만 실행됨:** `game_end_lock`이 §4 `spawn_lock`과 동일한 `SET NX` 패턴이라, 두 프로세스가 같은 틱에 종료를 감지해도 Redis가 하나만 통과시킨다
 - **막판 제출과의 레이스 없음:** §5 Lua 스크립트가 매 제출마다 자체적으로 60초 경과 여부를 체크하므로, 종료 처리가 시작된 후 도착한 제출은 `ZINCRBY` 자체가 실행되지 않는다 — 즉 2a에서 읽는 점수는 더 이상 바뀌지 않는 확정값이다
 - **크래시 내구성:** 락을 딴 프로세스가 2c(DB 기록) 전에 죽으면 `EX 30` 후 다른 프로세스가 재시도하지만, `GameResult.room`이 `OneToOneField`(방당 1행)라 재시도해도 같은 행을 다시 찾아올 뿐이고, `get_or_create`의 `created` 체크 덕분에 `total_score`가 중복 반영되지 않는다 (idempotent)
+- **`Room` 상태 갱신 누락 방지:** `Room.status="finished"`/`ended_at` 갱신도 `if created:` 블록 안에서 같이 처리한다 — `GameResult` 생성과 같은 조건에 묶여 있어서 재시도 시 중복 갱신되지 않고, 게임이 끝났는데 `Room.status`가 계속 `"playing"`으로 남는 일이 없다
 
 ## 7. 방 생명주기 — 입장/이탈/방장 위임
 
@@ -312,8 +314,31 @@ disconnect() 호출 시:
 
 같은 `game_end_lock`을 재사용하므로, 60초 타이머 종료와 이탈 종료가 동시에 발생해도(예: 59.9초에 나감) 둘 중 하나만 실행된다.
 
-## 8. 구현 TODO
+## 9. 클라이언트 클럭 동기화
+
+[클럭 동기화 리서치](../research/clock-sync.md)에서 채택한 "클럭 오프셋 보정"을 실제로 구현하는 방법. §5의 낙하 애니메이션 계산(`(now - spawn_ts) / fall_duration`)이 실제로 정확하려면, 클라이언트가 자기 시계와 서버 시계의 차이(`offset`)를 미리 알고 있어야 한다.
+
+**접속 시 한 번(또는 몇 번) 측정**
+
+```
+클라이언트 → 서버: {type: "clock.sync", client_sent_at: t0}   (WebSocket 메시지, 클라이언트 로컬시각 t0)
+서버 → 클라이언트: {type: "clock.sync.reply", client_sent_at: t0, server_time: t_server}
+                                                                    (서버가 받은 즉시 응답, t_server = 서버 현재시각)
+클라이언트가 t2(응답을 받은 시각)에서 계산:
+  rtt = t2 - t0
+  offset = t_server - (t0 + t2) / 2        ← NTP 방식과 동일한 추정 공식
+```
+
+- 지터를 줄이려면 이 왕복을 3~5회 반복해서 **가장 RTT가 작았던 샘플의 offset**을 채택 (RTT가 클수록 네트워크 지연이 컸다는 뜻이라 그 샘플의 offset 추정이 덜 정확함)
+- 클라이언트는 이후 낙하 위치 계산 시 `now()` 대신 `now() + offset`을 사용: `(now() + offset - spawn_ts) / fall_duration`
+- 서버 쪽은 별도 상태 저장이 필요 없다 — Consumer가 `clock.sync` 메시지를 받으면 그 즉시 현재 시각을 실어 답장만 하면 되는 stateless 핸들러
+
+**언제 측정하나**: WebSocket `connect()` 직후, 게임이 시작되기 전에 한 번 수행하면 충분하다 (게임 도중 재측정은 이 프로젝트 규모에선 불필요 — 세션 내내 클럭 드리프트가 무시할 수준).
+
+## 10. 구현 TODO
 
 - [x] 동일 텍스트 중복 스폰 — 금지로 확정. `CodeSnippet.text`에 `unique=True` 제약을 걸어 애초에 중복 text가 DB에 존재할 수 없게 함 (`text_index` 1:1 Hash 구조는 그대로 유지)
 - [x] 방 정원/방장 위임/이탈 처리 — §7 참고
 - [x] 승/패 판정 필드 — `GameResult.winner`(FK → User, null=무승부) 추가, 정상 종료는 점수 비교, 이탈 종료는 남은 유저로 강제 지정 — §6, §7 참고
+- [x] 클라이언트 클럭 오프셋 보정 — §9 참고
+- [x] 게임 종료 시 `Room.status`/`ended_at` 갱신 누락 — §6에 반영

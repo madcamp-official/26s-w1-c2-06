@@ -36,15 +36,28 @@
 
 > 구현할 기능을 사용자 관점에서 정리하고, 필수 기능과 선택 기능을 구분
 
-전체 아키텍처 설계는 [docs/architecture.md](./docs/architecture.md) 참고
+전체 아키텍처 설계는 [docs/plan/architecture.md](./docs/plan/architecture.md) 참고
 
 ### 필수 기능
 
-- [ ]
+- [ ] 회원가입/로그인 (아이디·비밀번호, 중복 아이디 검사)
+- [ ] 방 생성/참가 (초대 코드), 방 안 유저 목록 표시, "game start"로 시작
+- [ ] 낙하 코드 텍스트 실시간 스폰 (두 유저 화면에 동일하게 반영)
+- [ ] 텍스트 입력 후 Enter 제출 → 판정 매트릭스 (정답 +500 / 오답 -500 / 불일치 0점)
+- [ ] 매칭된 코드 즉시 제거, 양쪽 유저 화면에 실시간 반영
+- [ ] 한 판 60초 제한, 시간 종료 시 자동 결산
+- [ ] 게임 결과(이번 판 점수) DB 저장 + 유저 누적 점수 반영
+- [ ] 결산 화면 (이번 판 점수 표시)
 
 ### 선택 기능
 
-- [ ]
+- [x] 승/패 판정 및 표시 (동점 처리 규칙 포함) — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §6 참고
+- [x] 게임 중 이탈 시 즉시 종료 + 강제 패배 처리 — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §7 참고
+- [x] 방장 위임/방 삭제 (방장 이탈 시) — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §7 참고
+- [ ] 재대결
+- [ ] 페이즈 시스템 (오전/오후/마감 직전 20초 단위로 스폰·낙하 속도 증가)
+- [ ] 닉네임 표시 (계정 아이디와 별개로 인게임 표시명 사용 여부 — 미정)
+- [ ] 타이핑 중 실시간 하이라이트 (해당 시 접두사 트라이 도입 필요, [architecture.md](./docs/plan/architecture.md) §9)
 
 ---
 
@@ -60,14 +73,14 @@
 
 > 필요한 테이블, 주요 필드, 데이터 타입, 테이블 간 관계를 정리
 
-낙하 중인 코드, 선점 상태, 진행 중 점수처럼 계속 바뀌는 상태는 DB가 아니라 Redis가 담당하고([docs/architecture.md](./docs/architecture.md) §6), 아래는 **영속 데이터만** 담는 스키마 초안이다.
+낙하 중인 코드, 선점 상태, 진행 중 점수처럼 계속 바뀌는 상태는 DB가 아니라 Redis가 담당하고([docs/plan/architecture.md](./docs/plan/architecture.md) §6), 아래는 **영속 데이터만** 담는 스키마 초안이다.
 
 ```mermaid
 erDiagram
     USER ||--o| PROFILE : has
     USER ||--o{ ROOM : "player1 / player2"
-    USER ||--o{ GAMERESULT : submits
-    ROOM ||--o{ GAMERESULT : produces
+    USER ||--o{ GAMERESULT : "user1 / user2 / winner"
+    ROOM ||--|| GAMERESULT : produces
 
     USER {
         int id PK
@@ -91,14 +104,17 @@ erDiagram
     }
     GAMERESULT {
         int id PK
-        int room_id FK
-        int user_id FK
-        int score
+        int room_id FK "UK"
+        int user1_id FK
+        int user2_id FK
+        int score1
+        int score2
+        int winner_id FK "null 허용, 무승부"
         datetime ended_at
     }
     CODESNIPPET {
         int id PK
-        string text
+        string text UK
         bool is_correct
         datetime created_at
     }
@@ -117,20 +133,21 @@ erDiagram
 | | created_at | datetime | 방 생성 시각 |
 | | started_at | datetime, null 허용 | 두 유저가 다 들어와 게임이 시작된 시각 (Redis `game_started_at`과 동일 값을 영속화) |
 | | ended_at | datetime, null 허용 | 60초 경과 후 종료 처리가 끝난 시각 |
-| **GameResult** | room | FK → Room | |
-| | user | FK → User | |
-| | score | int | 이번 한 판의 최종 점수 (+500/-500 누적) |
+| **GameResult** | room | OneToOne → Room | 방(매치)당 정확히 1행 |
+| | user1, user2 | FK → User | 이 매치에 참여한 두 유저 |
+| | score1, score2 | int | 각 유저의 이번 한 판 최종 점수 (+500/-500 누적) |
+| | winner | FK → User, null 허용 | 승자. null이면 무승부(정상 종료 시 동점) — 이탈 종료는 남은 유저로 강제 지정 |
 | | ended_at | datetime, auto_now_add | 기록 생성 시각 |
-| **CodeSnippet** | text | string | 화면에 낙하시킬 코드 텍스트 |
+| **CodeSnippet** | text | string, unique | 화면에 낙하시킬 코드 텍스트 (중복 등록 방지) |
 | | is_correct | bool | 정답 코드 여부 |
 | | created_at | datetime | |
 
 ### 관계 및 제약
 
 - `Room.player1`/`player2`는 입장 시점에 채워지는 **누가 이 방에 있는지에 대한 유일한 영속 기록**이다. 게임 진행 중 실제 낙하/점수 상태는 Redis가 갖고 있고(architecture.md §6), Room 레코드는 재접속 시 "이 유저가 이 방에 들어올 자격이 있는가"를 DB로 검증하는 용도로 쓴다.
-- `GameResult(room, user)`에 **unique 제약**을 걸어, 같은 방·같은 유저에 대해 최종 점수가 두 번 기록되지 않게 한다 (architecture.md §8-1의 크래시 재시도 시나리오 대비).
+- `GameResult.room`을 **OneToOneField**로 걸어, 같은 방에 대해 결과가 두 번 기록되지 않게 한다 ([docs/plan/backend-implementation.md](./docs/plan/backend-implementation.md) §6의 크래시 재시도 시나리오 대비). 유저별 1행이 아니라 매치당 1행이라, 한 유저의 전체 전적을 조회하려면 `user1`/`user2` 양쪽을 다 확인해야 한다.
 - `CodeSnippet`은 특정 Room에 종속되지 않는 **전역 풀**이다. 어떤 스니펫이 어느 방에서 스폰됐는지는 Redis(`used_snippet_ids:{room}`)에서만 휘발성으로 관리하고 DB엔 남기지 않는다.
-- `Profile.total_score`는 `GameResult`가 새로 생성될 때만(재시도로 인한 중복 생성이 아닐 때만) `F("total_score") + score`로 원자 증가한다 (architecture.md §8-1).
+- `Profile.total_score`는 `GameResult`가 새로 생성될 때만(재시도로 인한 중복 생성이 아닐 때만) 양쪽 유저 모두 `F("total_score") + score`로 원자 증가한다 ([docs/plan/backend-implementation.md](./docs/plan/backend-implementation.md) §6).
 
 ---
 

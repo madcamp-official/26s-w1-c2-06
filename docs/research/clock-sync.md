@@ -40,10 +40,10 @@
 - 방법 1은 지금 설계(§5의 타임스탬프 기반 클라이언트 독립 계산)를 그대로 유지하면서, 실제로 문제가 되는 오차 요인(클라이언트 시계 어긋남)만 제거한다 — 비용 대비 효과가 가장 좋음
 - 단, **"완전히 동일한 화면"은 엄밀히는 불가능하다**는 전제는 남는다 — 두 클라이언트가 물리적으로 떨어져 있는 한 정보 전달엔 항상 시간이 걸리고, 어떤 기법을 써도 이 지연을 없앨 수는 없고 줄일 수만 있다. 방법 1은 그 오차를 "몇십 ms 수준(네트워크 지연)"까지 줄이는 것이지 "0"으로 만드는 게 아니다
 
-### 반영 필요 사항
+### 반영 완료
 
-- 접속(WebSocket 연결) 시 클라이언트-서버 간 RTT 측정 및 `offset` 계산 로직을 클라이언트/백엔드 양쪽에 추가해야 함 — [docs/plan/backend-implementation.md](../plan/backend-implementation.md)에 반영 필요
-- [docs/plan/architecture.md](../plan/architecture.md) §5의 "네트워크 지연 몇십 ms 차이는 시각적으로 무시 가능"이라는 문장 앞에 "클럭 오프셋 보정을 전제로" 같은 조건을 명시해야 함
+- 접속 시 RTT 측정 및 `offset` 계산 로직 → [docs/plan/backend-implementation.md](../plan/backend-implementation.md) §9에 반영
+- [docs/plan/architecture.md](../plan/architecture.md) §5에 "클럭 오프셋 보정을 전제로" 조건 명시 완료
 
 ## 참고 자료
 

@@ -27,12 +27,12 @@ Day 1                          Day 2              Day 3           Day 4
 - [😁] `docker-compose.yml`로 로컬 Postgres·Redis 실행 ([backend-implementation.md](./backend-implementation.md) §1-1)
 - [💪] DB 모델 구현 + migration: `Profile`, `Room`, `CodeSnippet`, `GameResult` (§2)
 - [👍] 회원가입/로그인 (Django 기본 auth 활용, 중복 아이디 검사, 비밀번호 정책 없음 — README 필수 기능)
-- [ ] `CodeSnippet` 시드 데이터 준비 (정답/오답 코드 텍스트 풀, `text` unique 제약 감안해서 중복 없이 준비)
-- [ ] 방 생성/참가 API (초대 코드 발급, `Room.player1`/`player2` 슬롯 채움, 정원 2명 검증)
-- [ ] 방 안 유저 목록 표시용 데이터, "game start" 트리거 (호스트만 시작 가능)
-- [ ] Channels Consumer 골격: `connect()` → `room_group_name`에 `group_add`, 대기 중 이탈 처리 (§7 전반부 — 비방장 이탈/방장 위임/빈 방 소프트 종료)
-- [ ] 게임 시작 이벤트 처리: `game_started_at` 기록 + `game.start` 브로드캐스트 (§6 "게임 시작" 파트)
-- [ ] 클럭 동기화 핸들러: `clock.sync` 메시지 받으면 서버 시각 실어 즉시 응답 (§9, stateless)
+- [x] `CodeSnippet` 시드 데이터 준비 (정답/오답 코드 텍스트 풀, `text` unique 제약 감안해서 중복 없이 준비)
+- [💪] 방 생성/참가 API (초대 코드 발급, `Room.player1`/`player2` 슬롯 채움, 정원 2명 검증)
+- [x] 방 안 유저 목록 표시용 데이터, "game start" 트리거 (호스트만 시작 가능)
+- [x] Channels Consumer 골격: `connect()` → `room_group_name`에 `group_add`, 대기 중 이탈 처리 (§7 전반부 — 비방장 이탈/방장 위임/빈 방 소프트 종료)
+- [x] 게임 시작 이벤트 처리: `game_started_at` 기록 + `game.start` 브로드캐스트 (§6 "게임 시작" 파트)
+- [x] 클럭 동기화 핸들러: `clock.sync` 메시지 받으면 서버 시각 실어 즉시 응답 (§9, stateless)
 
 **프론트엔드**
 - [ ] Vite + React 프로젝트 셋업, `/api`·`/ws` 프록시 설정
@@ -55,6 +55,7 @@ Day 1                          Day 2              Day 3           Day 4
   - Lua 스크립트 단위 테스트 (실제 로컬 Redis에 대고 `EVAL` 직접 호출 — 정답/오답/이미 선점됨/게임종료 후 4가지 케이스)
   - Consumer 통합 테스트 (Channels `WebsocketCommunicator`로 connect→spawn→submit→score 흐름 검증)
   - 게임 종료 동시 트리거 테스트 (같은 방에 대해 `game_end_lock` 획득 요청 2번 보냈을 때 정확히 하나만 통과하는지)
+  - [ ] 포트 터널링 공부하기. VM 에서 열리는 포트가 20,443 같은 거밖에없는데 장고는 8000이라 문제생기나봄(내 추측)
 
 **프론트엔드**
 - [ ] 게임 화면: `code.spawn` 이벤트 수신 → 낙하 애니메이션 렌더링 (`spawn_ts` 기준으로 위치 계산, [architecture.md](./architecture.md) §5)

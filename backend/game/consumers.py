@@ -10,10 +10,13 @@ from django.utils import timezone
 
 from .models import Room
 from .redis_client import get_redis
+from .redis_scripts import get_submit_script
 from .snippet_cache import clear_snippet_pool, get_snippet_pool
 
 GAME_DURATION_MS = 60000
 SPAWN_TICK_MS = 500
+SCORE_DELTA_CORRECT = 500
+SCORE_DELTA_INCORRECT = -500
 
 
 class GameConsumer(AsyncWebsocketConsumer):
@@ -55,7 +58,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._handle_game_start()
         elif msg_type == "clock.sync":
             await self._handle_clock_sync(data)
-        # submit 등은 Day 2에서 추가
+        elif msg_type == "code.submit":
+            await self._handle_submit(data)
 
     # --- 클럭 동기화 (§9, stateless — 상태 저장 없이 즉시 응답만) ---
 
@@ -191,6 +195,49 @@ class GameConsumer(AsyncWebsocketConsumer):
             },
         )
 
+    # --- 제출 판정 (§5, 매칭+선점+채점+제거를 Lua 스크립트 하나로 원자 처리) ---
+
+    async def _handle_submit(self, data):
+        text = (data.get("text") or "").strip()
+        if not text:
+            return
+
+        script = get_submit_script()
+        now_ms = int(time.time() * 1000)
+        result, detail = await script(
+            keys=[
+                f"text_index:{self.room_code}",
+                f"codes:{self.room_code}",
+                f"score:{self.room_code}",
+                f"game_started_at:{self.room_code}",
+            ],
+            args=[
+                text,
+                self.user.id,
+                SCORE_DELTA_CORRECT,
+                SCORE_DELTA_INCORRECT,
+                now_ms,
+                GAME_DURATION_MS,
+            ],
+        )
+
+        if result == 0:
+            # 화면에 없는 문자열이거나, 이미 남이 선점했거나, 60초가 지난 뒤 도착한 제출
+            # — 이번 판 점수에는 아무 영향 없음. 제출한 유저에게만 알려준다.
+            await self._send_json({"type": "code.submit.ack", "outcome": detail, "delta": 0})
+            return
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "code.result",
+                "code_id": detail,
+                "correct": result == 1,
+                "user_id": self.user.id,
+                "delta": SCORE_DELTA_CORRECT if result == 1 else SCORE_DELTA_INCORRECT,
+            },
+        )
+
     # --- group_send 브로드캐스트 수신 핸들러 ---
 
     async def game_start(self, event):
@@ -209,6 +256,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             "code_id": event["code_id"],
             "text": event["text"],
             "spawn_ts": event["spawn_ts"],
+        })
+
+    async def code_result(self, event):
+        await self._send_json({
+            "type": "code.result",
+            "code_id": event["code_id"],
+            "correct": event["correct"],
+            "user_id": event["user_id"],
+            "delta": event["delta"],
         })
 
     async def room_update(self, event):

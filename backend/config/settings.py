@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -129,8 +130,14 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
+#
+# 배포 시엔 npm run build 산출물(frontend/codebee-frontend/dist/)을 여기 연결해서
+# WhiteNoise가 daphne 프로세스 안에서 직접 서빙한다 (architecture.md §3, local-dev.md 참고).
+# 개발 중에는 Vite 개발 서버(:5173)가 프론트를 서빙하므로 이 설정과 무관하다.
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR.parent / 'frontend' / 'codebee-frontend' / 'dist']
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

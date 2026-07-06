@@ -4,6 +4,7 @@ channels==4.3.2
 channels_redis==4.3.0
 daphne==4.2.2
 psycopg2-binary==2.9.12
+whitenoise==6.11.0
 
 # 위 패키지들의 하위 의존성 — pip freeze로 버전 고정
 # (VM에 pip install -r requirements.txt 했을 때 로컬과 완전히 동일한 환경이 되도록)

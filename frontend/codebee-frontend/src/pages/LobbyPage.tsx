@@ -4,9 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { logout } from '../api/auth';
 import { getErrorMessage } from '../api/client';
 import { createRoom, getLeaderboard, getRoom, joinRoom } from '../api/rooms';
-import GameScreen, { FALL_DURATION_MS } from '../components/GameScreen';
+import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
+import Leaderboard from '../components/Leaderboard';
 import { useAuthStore } from '../store/authStore';
-import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard } from '../types';
+import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard, ScorePop } from '../types';
 import './LobbyPage.css';
 
 const STATUS_LABEL: Record<Room['status'], string> = {
@@ -42,6 +43,7 @@ function LobbyPage() {
   const [clockOffset, setClockOffset] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [myLeaderboardRank, setMyLeaderboardRank] = useState<LeaderboardEntry | null>(null);
+  const [scorePops, setScorePops] = useState<ScorePop[]>([]);
 
   const pollTimer = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -72,12 +74,25 @@ function LobbyPage() {
     if (room?.status !== 'playing') return;
 
     const interval = window.setInterval(() => {
-      const cutoff = Date.now() + clockOffset - FALL_DURATION_MS - 1000;
-      setFallingCodes((prev) => prev.filter((c) => c.spawnTs > cutoff));
+      const adjustedNow = Date.now() + clockOffset;
+      setFallingCodes((prev) => prev.filter((c) => adjustedNow - c.spawnTs < c.duration + 1000));
     }, 1000);
 
     return () => window.clearInterval(interval);
   }, [room?.status, clockOffset]);
+
+  // 로비/대기실에서도 전체 랭킹을 볼 수 있도록 최초 진입 시 한 번 불러온다
+  // (게임이 끝나면 game.over 핸들러가 다시 최신값으로 갱신한다)
+  useEffect(() => {
+    getLeaderboard()
+      .then(({ entries, me }) => {
+        setLeaderboard(entries);
+        setMyLeaderboardRank(me);
+      })
+      .catch(() => {
+        // 조회 실패는 조용히 무시 — 리더보드는 부가 정보라 화면 전체를 막을 이유가 없다
+      });
+  }, []);
 
   const myUserId = user?.id ?? null;
 
@@ -85,6 +100,16 @@ function LobbyPage() {
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current);
     feedbackTimeoutRef.current = window.setTimeout(() => setFeedback(null), 700);
   }, []);
+
+  // feedback을 null로 한 번 거쳤다가 다시 세팅한다 — 연속으로 같은 값(예: 연타 miss)이
+  // 와도 CSS 애니메이션(흔들림 등)이 리액트 리렌더로 인해 재생되지 않는 문제를 막는다.
+  const pulseFeedback = useCallback((next: 'correct' | 'incorrect' | 'miss') => {
+    setFeedback(null);
+    requestAnimationFrame(() => {
+      setFeedback(next);
+      scheduleFeedbackClear();
+    });
+  }, [scheduleFeedbackClear]);
 
   const handleSocketMessage = useCallback((data: Record<string, unknown>, receivedAt: number) => {
     switch (data.type) {
@@ -112,14 +137,13 @@ function LobbyPage() {
         );
         if (nextStatus === 'waiting') {
           // 재대결로 room이 waiting으로 되돌아온 경우 — 지난 판 잔여 상태 정리
+          // (리더보드는 로비/대기실에서도 계속 보여줄 것이므로 지우지 않는다)
           setFallingCodes([]);
           setScores({});
           setGameStartedAt(null);
           setGameDuration(null);
           setGameOver(null);
           setFeedback(null);
-          setLeaderboard([]);
-          setMyLeaderboardRank(null);
         }
         break;
       }
@@ -135,27 +159,43 @@ function LobbyPage() {
       case 'code.spawn': {
         const codeId = data.code_id as string;
         const text = data.text as string;
-        setFallingCodes((prev) => [...prev, { codeId, text, spawnTs: data.spawn_ts as number }]);
+        setFallingCodes((prev) => [
+          ...prev,
+          { codeId, text, spawnTs: data.spawn_ts as number, duration: data.duration as number },
+        ]);
         break;
       }
       case 'code.result': {
         const codeId = data.code_id as string;
         const userId = data.user_id as number;
         const delta = data.delta as number;
+        const correct = data.correct as boolean;
 
-        setFallingCodes((prev) => prev.filter((c) => c.codeId !== codeId));
+        // 즉시 지우지 않고 판정 결과를 표시만 해서, 점수판으로 날아가는 연출이 끝난
+        // 뒤에(RESOLVE_ANIM_MS) 실제로 목록에서 제거한다 (GameScreen 참고)
+        setFallingCodes((prev) =>
+          prev.map((c) => (c.codeId === codeId ? { ...c, resolution: { correct, userId } } : c)),
+        );
         setScores((prev) => ({ ...prev, [String(userId)]: (prev[String(userId)] ?? 0) + delta }));
 
+        const popId = `${codeId}-${Date.now()}`;
+        setScorePops((prev) => [...prev, { id: popId, userId, delta }]);
+        window.setTimeout(() => {
+          setScorePops((prev) => prev.filter((p) => p.id !== popId));
+        }, 900);
+
+        window.setTimeout(() => {
+          setFallingCodes((prev) => prev.filter((c) => c.codeId !== codeId));
+        }, RESOLVE_ANIM_MS);
+
         if (userId === myUserId) {
-          setFeedback(data.correct ? 'correct' : 'incorrect');
-          scheduleFeedbackClear();
+          pulseFeedback(correct ? 'correct' : 'incorrect');
         }
         break;
       }
       case 'code.submit.ack': {
         // 사설 ack — 나에게만 오는 메시지라 별도 신원 확인 없이 바로 내 피드백으로 처리
-        setFeedback('miss');
-        scheduleFeedbackClear();
+        pulseFeedback('miss');
         break;
       }
       case 'game.over': {
@@ -177,7 +217,7 @@ function LobbyPage() {
         break;
       }
     }
-  }, [scheduleFeedbackClear, myUserId]);
+  }, [pulseFeedback, myUserId]);
 
   // 방에 입장한 동안 연결을 유지하다가, 소켓이 끊기면(나가기 버튼 또는 탭 종료)
   // 서버 disconnect() 핸들러가 대기 중 이탈 처리를 해준다 (backend-implementation.md §7).
@@ -261,15 +301,22 @@ function LobbyPage() {
     setError(null);
     setFallingCodes([]);
     setScores({});
+    setScorePops([]);
     setGameStartedAt(null);
     setGameDuration(null);
     setGameOver(null);
     setFeedback(null);
     setClockOffset(0);
-    setLeaderboard([]);
-    setMyLeaderboardRank(null);
     clockBestRttRef.current = Infinity;
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current);
+
+    // 로비로 돌아왔을 때 리더보드를 최신 상태로 갱신 (지우지는 않는다 — 로비에서도 계속 보여줌)
+    getLeaderboard()
+      .then(({ entries, me }) => {
+        setLeaderboard(entries);
+        setMyLeaderboardRank(me);
+      })
+      .catch(() => {});
   }
 
   async function handleLogout() {
@@ -329,6 +376,10 @@ function LobbyPage() {
         </div>
       )}
 
+      {!room && (
+        <Leaderboard entries={leaderboard} me={myLeaderboardRank} myUsername={user?.username ?? null} />
+      )}
+
       {error && <p className="field-error">{error}</p>}
 
       {room && !gameOver && room.status === 'waiting' && (
@@ -372,6 +423,7 @@ function LobbyPage() {
         <GameScreen
           falling={fallingCodes}
           scores={scores}
+          scorePops={scorePops}
           myUserId={myUserId}
           myUsername={user?.username ?? null}
           opponentUsername={opponentUsername}
@@ -407,34 +459,7 @@ function LobbyPage() {
             </div>
           </div>
 
-          {(leaderboard.length > 0 || myLeaderboardRank) && (
-            <div className="leaderboard">
-              <h3>전체 랭킹</h3>
-              {leaderboard.length > 0 && (
-                <ol className="leaderboard-list">
-                  {leaderboard.map((entry) => (
-                    <li
-                      key={entry.username}
-                      className={entry.username === user?.username ? 'leaderboard-me' : ''}
-                    >
-                      <span className="leaderboard-rank">{entry.rank}</span>
-                      <span className="leaderboard-username">{entry.username}</span>
-                      <span className="leaderboard-score">{entry.total_score}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {myLeaderboardRank && (
-                <ol className="leaderboard-list leaderboard-list-me">
-                  <li className="leaderboard-me">
-                    <span className="leaderboard-rank">{myLeaderboardRank.rank}</span>
-                    <span className="leaderboard-username">{myLeaderboardRank.username}</span>
-                    <span className="leaderboard-score">{myLeaderboardRank.total_score}</span>
-                  </li>
-                </ol>
-              )}
-            </div>
-          )}
+          <Leaderboard entries={leaderboard} me={myLeaderboardRank} myUsername={user?.username ?? null} />
 
           {youAreHost ? (
             <button type="button" className="btn-primary" onClick={handleRematch}>

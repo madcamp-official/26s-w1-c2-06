@@ -6,6 +6,8 @@
 
 **결과물:** 기획부터 배포까지 완료된 웹 서비스와 관련 문서 일체
 
+**노션링크:** https://furtive-selenium-dc5.notion.site/3913ca9f2d6d8042a363db66ebae946b?source=copy_link
+
 ---
 
 ## 팀원
@@ -40,14 +42,14 @@
 
 ### 필수 기능
 
-- [ ] 회원가입/로그인 (아이디·비밀번호, 중복 아이디 검사)
-- [ ] 방 생성/참가 (초대 코드), 방 안 유저 목록 표시, "game start"로 시작
-- [ ] 낙하 코드 텍스트 실시간 스폰 (두 유저 화면에 동일하게 반영)
-- [ ] 텍스트 입력 후 Enter 제출 → 판정 매트릭스 (정답 +500 / 오답 -500 / 불일치 0점)
-- [ ] 매칭된 코드 즉시 제거, 양쪽 유저 화면에 실시간 반영
-- [ ] 한 판 60초 제한, 시간 종료 시 자동 결산
-- [ ] 게임 결과(이번 판 점수) DB 저장 + 유저 누적 점수 반영
-- [ ] 결산 화면 (이번 판 점수 표시)
+- [x] 회원가입/로그인 (아이디·비밀번호, 중복 아이디 검사)
+- [x] 방 생성/참가 (초대 코드), 방 안 유저 목록 표시, "game start"로 시작
+- [x] 낙하 코드 텍스트 실시간 스폰 (두 유저 화면에 동일하게 반영)
+- [x] 텍스트 입력 후 Enter 제출 → 판정 매트릭스 (정답 +500 / 오답 -500 / 불일치 0점)
+- [x] 매칭된 코드 즉시 제거, 양쪽 유저 화면에 실시간 반영
+- [x] 한 판 60초 제한, 시간 종료 시 자동 결산
+- [x] 게임 결과(이번 판 점수) DB 저장 + 유저 누적 점수 반영 (역대 최고 기록 기준, §DB 스키마 참고)
+- [x] 결산 화면 (이번 판 점수 표시)
 
 ### 선택 기능
 
@@ -159,7 +161,17 @@ erDiagram
 
 | Method | Endpoint | 설명 | 요청 | 응답 |
 |---|---|---|---|---|
-|  |  |  |  |  |
+| GET | `/api/csrf/` | CSRF 쿠키 발급 (로그인/회원가입 전 최초 1회 호출) | - | `{"detail": "csrf cookie set"}` |
+| POST | `/api/signup/` | 회원가입 | `{username, password}` | 201 `{id, username}` / 400 `{error: "username_password_required" \| "duplicate_username"}` |
+| POST | `/api/login/` | 로그인 | `{username, password}` | 200 `{id, username}` / 401 `{error: "invalid_credentials"}` |
+| POST | `/api/logout/` | 로그아웃 | - | `{"detail": "logged out"}` |
+| GET | `/api/me/` | 로그인 상태 확인 | - | 200 `{id, username}` / 401 `{error: "not_authenticated"}` |
+| POST | `/api/rooms/` | 방 생성 (호출자가 방장) | - | 201 `{code, status, player1, player2, is_host: true}` |
+| GET | `/api/rooms/<code>/` | 방 정보 조회 | - | 200 `{code, status, player1, player2, is_host}` / 404 `{error: "room_not_found"}` |
+| POST | `/api/rooms/<code>/join/` | 방 참가 | - | 200 `{..., is_host: false}` / 400 `{error: "room_full" \| "room_not_joinable"}` / 404 `{error: "room_not_found"}` |
+| GET | `/api/leaderboard/` | 전체 랭킹 (0점 이하 제외 상위 5명 + 본인이 5위 밖이면 별도 표기) | - | 200 `{entries: [{rank, username, total_score}], me: {...} \| null}` |
+
+WebSocket(`ws(s)://<host>/ws/room/<code>/`)으로 주고받는 실시간 이벤트(`game.start`/`code.spawn`/`code.result`/`game.over`/`rematch` 등)는 REST가 아니라 별도 프로토콜이라 이 표에는 없음 — 메시지 타입별 상세는 [architecture.md](./docs/plan/architecture.md), [backend-implementation.md](./docs/plan/backend-implementation.md) 참고.
 
 ---
 

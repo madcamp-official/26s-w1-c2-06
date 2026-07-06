@@ -37,7 +37,7 @@ def signup(request):
     Profile.objects.create(user=user)
 
     # 회원가입 후 자동 로그인하지 않음 — 로그인 화면으로 이동해서 다시 로그인
-    return JsonResponse({"username": user.username}, status=201)
+    return JsonResponse({"id": user.id, "username": user.username}, status=201)
 
 
 @require_POST
@@ -51,7 +51,7 @@ def login_view(request):
         return JsonResponse({"error": "invalid_credentials"}, status=401)
 
     login(request, user)
-    return JsonResponse({"username": user.username})
+    return JsonResponse({"id": user.id, "username": user.username})
 
 
 @require_POST
@@ -64,7 +64,7 @@ def logout_view(request):
 def me(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
-    return JsonResponse({"username": request.user.username})
+    return JsonResponse({"id": request.user.id, "username": request.user.username})
 
 
 def _generate_room_code():

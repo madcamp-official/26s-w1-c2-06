@@ -295,6 +295,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 SCORE_DELTA_INCORRECT,
                 now_ms,
                 GAME_DURATION_MS,
+                self.room_code,
             ],
         )
 

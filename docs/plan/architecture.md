@@ -40,16 +40,19 @@
 | 환경 | 구성 |
 |---|---|
 | 로컬 개발 | Django Channels 워커 프로세스 여러 개(native) + Redis·Postgres(Docker) |
-| 배포 | VM(KCLOUD, 몰입캠프 제공) 위에 Channels 워커 여러 개(native, systemd로 관리) + Postgres·Redis(같은 VM, Docker), 앞단은 Cloudflare(DNS/프록시, WebSocket 통과 가능) |
+| 배포 | VM(KCLOUD, 몰입캠프 제공) 위에 nginx(리버스 프록시) + Channels 워커 여러 개(native, systemd로 관리) + Postgres·Redis(같은 VM, Docker), 앞단은 Cloudflare(DNS/프록시, WebSocket 통과 가능) |
 
 [사용자]
     ↓
 [Cloudflare] ← DNS(캠프 도메인의 서브도메인, 무료 신청) + 프록시 + WebSocket 통과
     ↓
 [KCLOUD VM (한 대)]
-    ├── Channels 워커 프로세스 여러 개 (systemd가 관리)
+    ├── nginx (80/443 리버스 프록시 → 127.0.0.1:8000)
+    ├── Channels 워커 프로세스 여러 개 (systemd가 관리, 8000번 등 로컬 포트만 사용)
     ├── Postgres (Docker 컨테이너)
     └── Redis (Docker 컨테이너)
+
+**nginx가 앞단에 낀 이유**: KCLOUD VM 방화벽이 22/80/443만 개방돼 있고 임의 포트(8000 등)를 열 수 없다. daphne를 80/443에 직접 바인딩하는 방법도 있지만 특권 포트라 root 실행이 필요해 보안상 지양했다. 대신 nginx가 80(/443)을 받아서 로컬(`127.0.0.1:8000`)의 daphne로 프록시한다 — daphne는 그대로 비특권 유저로 실행. `/ws/` 경로는 `Upgrade`/`Connection: upgrade` 헤더를 그대로 넘겨줘야 WebSocket이 통과한다. 로컬 개발 환경(방화벽 제약 없음)에는 nginx가 필요 없다 — Vite가 8000으로 직접 프록시하는 지금 구조 그대로 유지.
 
 **Render 대신 KCLOUD VM으로 결정** ([docs/research/deployment-hosting.md](../research/deployment-hosting.md) 참고). 이유는 두 가지: (1) 가상 머신을 직접 다뤄보는 경험 자체가 목적, (2) KCLOUD(카이스트 제공)와 서브도메인이 캠프 측에서 이미 무료로 제공되어, Render를 검토했던 원래 이유(비용 $0)도 VM 방식에서 그대로 달성된다 — 그러면서 Render의 콜드스타트/Postgres 30일 만료/Redis 용량 제한 같은 트레이드오프도 없음.
 

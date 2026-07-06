@@ -64,8 +64,9 @@ CHANNEL_LAYERS = {
 1. VM 발급받고 SSH 접속 (공인 IP 확인)
 2. Docker 설치 → §1-1의 docker-compose.yml로 Postgres·Redis 컨테이너 실행
 3. Python/venv 설치 → 레포 클론 → .env에 운영용 DB/Redis 접속정보 설정
-4. 아래 systemd 유닛 등록 → Django Channels 워커를 상시 프로세스로 구동
-5. 방화벽에서 앱 포트(예: 8000) 개방
+4. 아래 systemd 유닛 등록 → Django Channels 워커를 상시 프로세스로 구동 (127.0.0.1:8000, 외부 노출 안 함)
+5. nginx 설치 → 아래 설정으로 80(/443)을 127.0.0.1:8000으로 리버스 프록시
+   (VM 방화벽이 22/80/443만 개방돼 있어 8000을 직접 열 수 없음 — architecture.md §3 참고)
 6. Cloudflare에서 캠프 도메인의 서브도메인을 신청하고, A 레코드를 VM 공인 IP로 연결
    (Cloudflare 프록시 On 상태로 두면 HTTPS와 WebSocket 통과를 Cloudflare가 처리 — VM에 별도 인증서 설정 불필요)
 ```
@@ -78,13 +79,38 @@ After=network.target docker.service
 
 [Service]
 WorkingDirectory=/opt/codebee
-ExecStart=/opt/codebee/.venv/bin/daphne -b 0.0.0.0 -p 8000 config.asgi:application
+ExecStart=/opt/codebee/.venv/bin/daphne -b 127.0.0.1 -p 8000 config.asgi:application
 Restart=always
 EnvironmentFile=/opt/codebee/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+```nginx
+# /etc/nginx/sites-available/codebee (배포 VM, 예시)
+server {
+    listen 80;
+    server_name <캠프-서브도메인>;
+
+    location /ws/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+daphne는 `127.0.0.1`에만 바인딩(외부에서 8000으로 직접 접근 불가), nginx가 80을 받아 로컬로만 프록시한다. 정적 파일은 지금 설계대로 WhiteNoise가 daphne를 통해 서빙 — nginx는 그대로 통과만 시키고 별도로 서빙하지 않는다. 로컬 개발에서 이 구성을 미리 검증할 때는 `brew install nginx`로 동일한 설정을 테스트할 수 있다(맥 로컬 nginx는 `/opt/homebrew/etc/nginx/`).
 
 Django 연결 설정은 §1-1의 `DATABASES`/`CHANNEL_LAYERS`와 동일하되, `HOST`가 `localhost`인 것만 유지하면 된다 (Postgres·Redis 컨테이너가 같은 VM에서 포트로 열려 있으므로).
 

@@ -15,9 +15,14 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+
+from .views import spa_index
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('game.urls')),
+    # SPA catch-all: api/admin/static 나머지 경로는 전부 빌드된 index.html로 응답
+    # (react-router-dom의 클라이언트 라우팅이 새로고침/딥링크에서도 동작하도록)
+    re_path(r'^(?!api/|admin/|static/).*$', spa_index),
 ]

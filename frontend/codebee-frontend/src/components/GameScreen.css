@@ -15,6 +15,7 @@
 }
 
 .score-box {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -23,6 +24,72 @@
 
 .score-box-right {
   align-items: flex-end;
+}
+
+.score-pops {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.score-box-right .score-pops {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.score-pop {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--mono);
+  white-space: nowrap;
+  animation: score-pop-float 900ms ease-out forwards;
+}
+
+.score-box-right .score-pop {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.score-pop.pop-positive {
+  color: #16a34a;
+}
+
+.score-pop.pop-negative {
+  color: #e0245e;
+}
+
+@keyframes score-pop-float {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -32px);
+  }
+}
+
+.score-box-right .score-pop.pop-positive,
+.score-box-right .score-pop.pop-negative {
+  animation-name: score-pop-float-right;
+}
+
+@keyframes score-pop-float-right {
+  from {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(0, -32px);
+  }
 }
 
 .score-label {
@@ -67,6 +134,58 @@
   white-space: nowrap;
 }
 
+/* 판정 완료 후 점수판 쪽으로 날아가며 사라지는 연출 */
+.falling-code.resolved {
+  pointer-events: none;
+}
+
+.falling-code.resolved.correct {
+  color: #16a34a;
+  border-color: #16a34a;
+}
+
+.falling-code.resolved.incorrect {
+  color: #e0245e;
+  border-color: #e0245e;
+}
+
+.falling-code.resolved.flying {
+  z-index: 50;
+  animation: fly-to-score var(--resolve-ms, 650ms) ease-in forwards;
+}
+
+@keyframes fly-to-score {
+  to {
+    transform: translate(var(--fly-x, 0px), var(--fly-y, 0px)) scale(0.25);
+    opacity: 0;
+  }
+}
+
+/* 날아가는 코드가 가루처럼 흩어지는 파티클 */
+.particle-burst {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: particle-burst var(--resolve-ms, 650ms) ease-out forwards;
+}
+
+@keyframes particle-burst {
+  to {
+    transform: translate(var(--dx), var(--dy)) scale(0);
+    opacity: 0;
+  }
+}
+
 .submit-form {
   display: flex;
   gap: 8px;
@@ -98,5 +217,30 @@
 }
 
 .submit-form.feedback-miss input {
-  border-color: var(--text);
+  border-color: #e0245e;
+  background: rgba(224, 36, 94, 0.08);
+}
+
+.submit-form.feedback-miss {
+  animation: input-shake 400ms ease-in-out;
+}
+
+@keyframes input-shake {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  20%,
+  80% {
+    transform: translateX(4px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-8px);
+  }
+  40%,
+  60% {
+    transform: translateX(8px);
+  }
 }

@@ -50,10 +50,12 @@ class SubmitScriptTests(SimpleTestCase):
     def tearDown(self):
         self.redis.delete(*self.keys)
 
-    def _seed_code(self, code_id, text, is_correct, started_ago_ms=1000):
-        self.redis.hset(f"codes:{self.room}", code_id, f"{text}|{'1' if is_correct else '0'}")
-        self.redis.hset(f"text_index:{self.room}", text, code_id)
+    def _seed_code(self, code_id, text, is_correct, started_ago_ms=1000, code_age_ms=100, fall_duration_ms=9000):
         now_ms = int(time.time() * 1000)
+        spawn_ts = now_ms - code_age_ms
+        packed = "\x01".join([text, "1" if is_correct else "0", str(spawn_ts), str(fall_duration_ms)])
+        self.redis.hset(f"codes:{self.room}", code_id, packed)
+        self.redis.hset(f"text_index:{self.room}", text, code_id)
         self.redis.set(f"game_started_at:{self.room}", now_ms - started_ago_ms)
 
     def _submit(self, text, user_id=None):
@@ -129,6 +131,21 @@ class SubmitScriptTests(SimpleTestCase):
         self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 60초 경과 후엔 매치 여부와 무관하게 아무 것도 건드리지 않는다
         self.assertEqual(self.redis.hget(f"text_index:{self.room}", "raise ValueError('bad')"), "5")
+
+    def test_code_already_fallen_off_screen_does_not_score(self):
+        # 이 코드의 개별 낙하 시간(fall_duration_ms)이 이미 지난 상태 — 화면에서는
+        # 이미 사라진 코드인데 서버가 여전히 매칭해버리면 "화면에 없는 코드에 점수가
+        # 오르는" 버그가 재현된다.
+        self._seed_code("6", "def g():", is_correct=True, code_age_ms=10_000, fall_duration_ms=9000)
+
+        result, detail = self._submit("def g():")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(detail, "expired")
+        self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
+        # 만료된 코드는 더 이상 매치되면 안 되므로 인덱스/코드 해시에서 함께 제거된다
+        self.assertIsNone(self.redis.hget(f"text_index:{self.room}", "def g():"))
+        self.assertIsNone(self.redis.hget(f"codes:{self.room}", "6"))
 
 
 class GameEndLockTests(SimpleTestCase):

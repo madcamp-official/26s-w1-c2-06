@@ -20,6 +20,21 @@ SPAWN_TICK_MS = 500
 SCORE_DELTA_CORRECT = 500
 SCORE_DELTA_INCORRECT = -500
 
+# codes:{room} 해시 값 패킹 구분자 — "|"는 코드 텍스트 자체에 나올 수 있어(예:
+# `Optional[int] | None`) 쓰지 않는다. 제어문자라 실제 코드 스니펫에 나올 일이 없다.
+PACK_SEP = "\x01"
+
+# 코드 길이에 따라 낙하 시간을 다르게 준다(길수록 느리게) — 화면에 보이는 낙하는
+# spawn_ts/duration을 code.spawn으로 그대로 클라이언트에 내려줘서 양쪽 화면이
+# 동일하게 계산하므로 동기화는 그대로 유지된다.
+FALL_BASE_MS = 5000
+FALL_PER_CHAR_MS = 150
+FALL_MAX_MS = 14000
+
+
+def compute_fall_duration_ms(text):
+    return min(FALL_MAX_MS, FALL_BASE_MS + len(text) * FALL_PER_CHAR_MS)
+
 
 class GameConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -215,7 +230,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             return  # 후보를 10번 뽑아도 전부 중복 — 이번 틱은 스킵 (풀 소진에 가까움)
 
         code_id = str(snippet["id"])
-        value = f"{snippet['text']}|{'1' if snippet['is_correct'] else '0'}"
+        spawn_ts = int(time.time() * 1000)
+        duration_ms = compute_fall_duration_ms(snippet["text"])
+        value = PACK_SEP.join(
+            [snippet["text"], "1" if snippet["is_correct"] else "0", str(spawn_ts), str(duration_ms)]
+        )
         await r.hset(f"codes:{self.room_code}", code_id, value)
         await r.hset(f"text_index:{self.room_code}", snippet["text"], code_id)
 
@@ -225,7 +244,8 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "type": "code.spawn",
                 "code_id": code_id,
                 "text": snippet["text"],
-                "spawn_ts": int(time.time() * 1000),
+                "spawn_ts": spawn_ts,
+                "duration": duration_ms,
             },
         )
 
@@ -368,6 +388,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "code_id": event["code_id"],
             "text": event["text"],
             "spawn_ts": event["spawn_ts"],
+            "duration": event["duration"],
         })
 
     async def code_result(self, event):

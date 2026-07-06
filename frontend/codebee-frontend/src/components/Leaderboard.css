@@ -7,15 +7,16 @@
 }
 
 .leaderboard h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-family: var(--mono);
   color: var(--text);
 }
 
 .leaderboard-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -26,24 +27,26 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: 0;
+  border: 2px solid var(--border);
   background: var(--code-bg);
 }
 
 .leaderboard-list li.leaderboard-me {
-  border: 1px solid var(--accent-border);
+  border: 2px solid var(--accent);
 }
 
 .leaderboard-list-me {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 2px dashed var(--border);
 }
 
 .leaderboard-rank {
   width: 20px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
+  font-family: var(--mono);
 }
 
 .leaderboard-username {

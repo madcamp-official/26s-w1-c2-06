@@ -7,26 +7,35 @@
   --accent: #aa3bff;
   --accent-bg: rgba(170, 59, 255, 0.1);
   --accent-border: rgba(170, 59, 255, 0.5);
+  --sting: #ffb020;
+  --neon-green: #39ff14;
+  --neon-red: #ff2a6d;
   --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --shadow: 4px 4px 0 rgba(8, 6, 13, 0.25);
+  /* 모눈종이 그리드 — 배경 이미지 레이어 목록이라, 각 패널에서
+     `background: var(--grid-pattern), <바탕색>;`처럼 마지막에 바탕색을 얹어 쓴다. */
+  --grid-pattern:
+    repeating-linear-gradient(0deg, var(--border) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(90deg, var(--border) 0 1px, transparent 1px 22px);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* 픽셀아트 폰트 3종 — Galmuri(한글 도트), Press Start 2P(영문/숫자 아케이드),
+     GalmuriMono(코드/점수용 도트 고정폭). 시스템 폰트는 글리프가 없을 때의 fallback. */
+  --sans: 'Galmuri11', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: 'Galmuri14', 'Press Start 2P', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'GalmuriMono11', 'Press Start 2P', ui-monospace, Consolas, monospace;
+  --pixel-display: 'Press Start 2P', 'GalmuriMono11', ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
+  font: 15px/165% var(--sans);
   letter-spacing: 0.18px;
   color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  image-rendering: pixelated;
 
   @media (max-width: 1024px) {
-    font-size: 16px;
+    font-size: 13px;
   }
 }
 
@@ -41,8 +50,7 @@
     --accent-bg: rgba(192, 132, 252, 0.15);
     --accent-border: rgba(192, 132, 252, 0.5);
     --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+    --shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
   }
 
   #social .button-icon {
@@ -55,11 +63,13 @@
   max-width: 100%;
   margin: 0 auto;
   text-align: center;
-  border-inline: 1px solid var(--border);
+  border-inline: 4px solid var(--border);
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  background: var(--grid-pattern), var(--bg);
+  background-size: 22px 22px;
 }
 
 body {
@@ -69,26 +79,28 @@ body {
 h1,
 h2 {
   font-family: var(--heading);
-  font-weight: 500;
+  font-weight: 400;
   color: var(--text-h);
+  text-wrap: balance;
 }
 
 h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
+  font-size: 33px;
+  line-height: 140%;
+  letter-spacing: 0;
   margin: 32px 0;
   @media (max-width: 1024px) {
-    font-size: 36px;
+    font-size: 22px;
     margin: 20px 0;
   }
 }
 h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
+  font-size: 18px;
+  line-height: 150%;
+  letter-spacing: 0;
+  margin: 0 0 10px;
   @media (max-width: 1024px) {
-    font-size: 20px;
+    font-size: 16px;
   }
 }
 p {
@@ -99,13 +111,14 @@ code,
 .counter {
   font-family: var(--mono);
   display: inline-flex;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--text-h);
 }
 
 code {
-  font-size: 15px;
-  line-height: 135%;
+  font-size: 14px;
+  line-height: 150%;
   padding: 4px 8px;
   background: var(--code-bg);
+  border: 2px solid var(--border);
 }

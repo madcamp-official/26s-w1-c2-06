@@ -1,0 +1,41 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  shape-rendering: crispEdges;
+}
+
+.logo-hex {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+}
+
+.logo-lines {
+  fill: none;
+  stroke: var(--text-h);
+  stroke-width: 6;
+  stroke-linecap: square;
+}
+
+.logo-sting {
+  fill: var(--sting);
+}
+
+.logo-word {
+  font-family: var(--pixel-display);
+  font-weight: 400;
+  font-size: 13px;
+  letter-spacing: 0;
+  color: var(--text-h);
+}
+
+.logo-bee {
+  color: var(--accent);
+}

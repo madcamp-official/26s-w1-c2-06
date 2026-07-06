@@ -1,0 +1,150 @@
+{
+  "info": {
+    "name": "코드비 API",
+    "description": "docs/plan/backend-implementation.md, Notion API 명세와 동일한 엔드포인트. CSRF 토큰은 컬렉션 스크립트가 자동으로 캡처/첨부하므로 각 요청에서 신경 쓸 필요 없음.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "csrftoken", "value": "" },
+    { "key": "room_code", "value": "" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// GET/HEAD 이외의 요청엔 X-CSRFToken 헤더를 자동으로 붙임",
+          "const method = pm.request.method;",
+          "if (method !== 'GET' && method !== 'HEAD') {",
+          "    pm.request.headers.upsert({",
+          "        key: 'X-CSRFToken',",
+          "        value: pm.collectionVariables.get('csrftoken')",
+          "    });",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Django가 login() 시 csrftoken을 rotate하므로, 매 응답마다 최신 값으로 갱신",
+          "const token = pm.cookies.get('csrftoken');",
+          "if (token) {",
+          "    pm.collectionVariables.set('csrftoken', token);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "1. CSRF 쿠키 발급",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/csrf/", "host": ["{{base_url}}"], "path": ["api", "csrf", ""] }
+          }
+        },
+        {
+          "name": "2. 회원가입",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser1\",\n  \"password\": \"testpass123\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/signup/", "host": ["{{base_url}}"], "path": ["api", "signup", ""] }
+          }
+        },
+        {
+          "name": "3. 로그인",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser1\",\n  \"password\": \"testpass123\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/login/", "host": ["{{base_url}}"], "path": ["api", "login", ""] }
+          }
+        },
+        {
+          "name": "4. 로그인 상태 확인 (me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/me/", "host": ["{{base_url}}"], "path": ["api", "me", ""] }
+          }
+        },
+        {
+          "name": "5. 로그아웃",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/logout/", "host": ["{{base_url}}"], "path": ["api", "logout", ""] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "1. 방 생성",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 응답의 방 코드를 room_code 변수에 저장 -> 아래 join/detail 요청이 바로 사용",
+                  "const body = pm.response.json();",
+                  "if (body.code) {",
+                  "    pm.collectionVariables.set('room_code', body.code);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/rooms/", "host": ["{{base_url}}"], "path": ["api", "rooms", ""] }
+          }
+        },
+        {
+          "name": "2. 방 참가",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/join/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", "join", ""]
+            }
+          }
+        },
+        {
+          "name": "3. 방 상태 조회",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/rooms/{{room_code}}/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "rooms", "{{room_code}}", ""]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -12,8 +12,8 @@
 
 | 이름 | GitHub | 역할 |
 |---|---|---|
-|  |  |  |
-|  |  |  |
+| 박서윤 | [banunas](https://github.com/banunas) |  |
+| 김도현 | [dotori235](https://github.com/dotori235) |  |
 
 ---
 
@@ -21,10 +21,14 @@
 
 > 프로젝트 주제, 목적, 핵심 기능, 예상 사용자, 팀원별 역할 등 정리
 
-- **주제:**
-- **목적:**
+- **주제:** 2인 실시간 대전 타이핑 게임 "코드비" — 화면에 낙하하는 코드 스니펫을 보고 빠르게 타이핑해 맞히는 웹 게임
+- **목적:** 방(room)에 입장한 두 유저가 동일한 화면을 실시간으로 공유하며 경쟁하는 서비스를 통해, WebSocket 기반 실시간 동기화와 동시성 제어(레이스 컨디션 방지)를 직접 설계·구현해본다
 - **핵심 기능:**
-- **예상 사용자:**
+  - 화면에 코드 텍스트가 무작위로 스폰되어 위에서 아래로 낙하, 바닥에 닿으면 자동 소멸
+  - 유저가 텍스트를 입력 후 Enter로 제출 → 낙하 중인 코드와 완전히 일치하면 판정 (정답 +500 / 오답 -500 / 불일치 0점)
+  - 매칭된 코드는 두 유저 화면에서 동시에 즉시 제거되어 실시간 반영
+  - Redis 원자 연산 기반으로 동시 제출 시에도 한 명만 점수를 획득하도록 레이스 컨디션 방지
+- **예상 사용자:** 같은 방에서 실시간으로 함께 게임을 즐기고 싶은 2인 (친구, 스터디 메이트 등)
 
 ---
 
@@ -32,13 +36,28 @@
 
 > 구현할 기능을 사용자 관점에서 정리하고, 필수 기능과 선택 기능을 구분
 
+전체 아키텍처 설계는 [docs/plan/architecture.md](./docs/plan/architecture.md) 참고
+
 ### 필수 기능
 
-- [ ]
+- [ ] 회원가입/로그인 (아이디·비밀번호, 중복 아이디 검사)
+- [ ] 방 생성/참가 (초대 코드), 방 안 유저 목록 표시, "game start"로 시작
+- [ ] 낙하 코드 텍스트 실시간 스폰 (두 유저 화면에 동일하게 반영)
+- [ ] 텍스트 입력 후 Enter 제출 → 판정 매트릭스 (정답 +500 / 오답 -500 / 불일치 0점)
+- [ ] 매칭된 코드 즉시 제거, 양쪽 유저 화면에 실시간 반영
+- [ ] 한 판 60초 제한, 시간 종료 시 자동 결산
+- [ ] 게임 결과(이번 판 점수) DB 저장 + 유저 누적 점수 반영
+- [ ] 결산 화면 (이번 판 점수 표시)
 
 ### 선택 기능
 
-- [ ]
+- [x] 승/패 판정 및 표시 (동점 처리 규칙 포함) — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §6 참고
+- [x] 게임 중 이탈 시 즉시 종료 + 강제 패배 처리 — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §7 참고
+- [x] 방장 위임/방 삭제 (방장 이탈 시) — 설계 완료, [backend-implementation.md](./docs/plan/backend-implementation.md) §7 참고
+- [x] 재대결 — 방 유지, 방당 여러 판 저장. [backend-implementation.md](./docs/plan/backend-implementation.md) §6 참고
+- [ ] 페이즈 시스템 (오전/오후/마감 직전 20초 단위로 스폰·낙하 속도 증가)
+- [ ] 닉네임 표시 (계정 아이디와 별개로 인게임 표시명 사용 여부 — 미정)
+- [ ] 타이핑 중 실시간 하이라이트 (해당 시 접두사 트라이 도입 필요, [architecture.md](./docs/plan/architecture.md) §9)
 
 ---
 
@@ -54,7 +73,83 @@
 
 > 필요한 테이블, 주요 필드, 데이터 타입, 테이블 간 관계를 정리
 
-<!-- ERD 이미지 또는 테이블 정의 -->
+낙하 중인 코드, 선점 상태, 진행 중 점수처럼 계속 바뀌는 상태는 DB가 아니라 Redis가 담당하고([docs/plan/architecture.md](./docs/plan/architecture.md) §6), 아래는 **영속 데이터만** 담는 스키마 초안이다.
+
+```mermaid
+erDiagram
+    USER ||--o| PROFILE : has
+    USER ||--o{ ROOM : "player1 / player2"
+    USER ||--o{ GAMERESULT : "user1 / user2 / winner"
+    ROOM ||--o{ GAMERESULT : "produces (재대결 시 여러 판)"
+
+    USER {
+        int id PK
+        string username
+        string email
+    }
+    PROFILE {
+        int id PK
+        int user_id FK
+        int total_score
+    }
+    ROOM {
+        int id PK
+        string code UK
+        string status
+        int player1_id FK
+        int player2_id FK
+        datetime created_at
+        datetime started_at
+        datetime ended_at
+    }
+    GAMERESULT {
+        int id PK
+        int room_id FK
+        bigint started_at_ms "room과 합쳐 판 구분 UK"
+        int user1_id FK
+        int user2_id FK
+        int score1
+        int score2
+        int winner_id FK "null 허용, 무승부"
+        datetime ended_at
+    }
+    CODESNIPPET {
+        int id PK
+        string text UK
+        bool is_correct
+        datetime created_at
+    }
+```
+
+### 테이블 정의
+
+| 테이블 | 필드 | 타입 | 설명 |
+|---|---|---|---|
+| **User** | (Django 기본 `auth.User`) | - | 로그인 계정 |
+| **Profile** | user | OneToOne → User | |
+| | total_score | int, default 0 | 지금까지 치른 판 중 가장 높았던 한 판의 점수 (역대 최고 기록, 누적 아님) |
+| **Room** | code | string, unique | 초대/입장 코드 |
+| | status | string (`waiting`/`playing`/`finished`) | 방 상태 |
+| | player1, player2 | FK → User, null 허용 | 입장 순서대로 채워짐 |
+| | created_at | datetime | 방 생성 시각 |
+| | started_at | datetime, null 허용 | 두 유저가 다 들어와 게임이 시작된 시각 (Redis `game_started_at`과 동일 값을 영속화) |
+| | ended_at | datetime, null 허용 | 60초 경과 후 종료 처리가 끝난 시각 |
+| **GameResult** | room | FK → Room | 판(라운드)당 1행 — 재대결 시 방당 여러 행 가능 |
+| | started_at_ms | bigint | 이 판의 `game_started_at` epoch ms. `(room, started_at_ms)`가 판을 구분하는 UK |
+| | user1, user2 | FK → User | 이 매치에 참여한 두 유저 |
+| | score1, score2 | int | 각 유저의 이번 한 판 최종 점수 (+500/-500 누적) |
+| | winner | FK → User, null 허용 | 승자. null이면 무승부(정상 종료 시 동점) — 이탈 종료는 남은 유저로 강제 지정 |
+| | ended_at | datetime, auto_now_add | 기록 생성 시각 |
+| **CodeSnippet** | text | string, unique | 화면에 낙하시킬 코드 텍스트 (중복 등록 방지) |
+| | is_correct | bool | 정답 코드 여부 |
+| | created_at | datetime | |
+
+### 관계 및 제약
+
+- `Room.player1`/`player2`는 입장 시점에 채워지는 **누가 이 방에 있는지에 대한 유일한 영속 기록**이다. 게임 진행 중 실제 낙하/점수 상태는 Redis가 갖고 있고(architecture.md §6), Room 레코드는 재접속 시 "이 유저가 이 방에 들어올 자격이 있는가"를 DB로 검증하는 용도로 쓴다.
+- `GameResult.room`은 **ForeignKey**다 — 재대결로 같은 방을 재사용하면 방당 여러 판이 쌓일 수 있어서, `(room, started_at_ms)` 조합을 유니크 제약(UK)으로 걸어 같은 판이 두 번 기록되지 않게 한다 ([docs/plan/backend-implementation.md](./docs/plan/backend-implementation.md) §6의 크래시 재시도 시나리오 대비). 유저별 1행이 아니라 판당 1행이라, 한 유저의 전체 전적을 조회하려면 `user1`/`user2` 양쪽을 다 확인해야 한다.
+- `CodeSnippet`은 특정 Room에 종속되지 않는 **전역 풀**이다. 어떤 스니펫이 어느 방에서 스폰됐는지는 Redis(`used_snippet_ids:{room}`)에서만 휘발성으로 관리하고 DB엔 남기지 않는다.
+- `Profile.total_score`는 `GameResult`가 새로 생성될 때만(재시도로 인한 중복 생성이 아닐 때만) 양쪽 유저 모두 `Greatest("total_score", score)`로 원자 갱신한다 — 누적합이 아니라 역대 최고 기록이라, 이번 판 점수가 기존 기록보다 낮으면 값이 바뀌지 않는다 ([docs/plan/backend-implementation.md](./docs/plan/backend-implementation.md) §6).
 
 ---
 

@@ -49,7 +49,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             with contextlib.suppress(asyncio.CancelledError):
                 await spawn_task
 
-        await self._handle_waiting_leave()
+        room = await self._get_room()
+        if room is not None and room.status == "playing":
+            # 게임 중 이탈 (§7 후반부) — 60초를 기다리지 않고 즉시 종료 처리,
+            # 남은 유저를 점수와 무관하게 승자로 강제 지정
+            remaining_id = room.player2_id if room.player1_id == self.user.id else room.player1_id
+            await self._try_end_game(forced_winner_id=remaining_id)
+        else:
+            await self._handle_waiting_leave()
+
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
@@ -200,7 +208,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # --- 게임 종료 및 최종 점수 반영 (§6) ---
 
-    async def _try_end_game(self):
+    async def _try_end_game(self, forced_winner_id=None):
         r = get_redis()
         acquired = await r.set(
             f"game_end_lock:{self.room_code}", self.channel_name, nx=True, ex=30
@@ -216,7 +224,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         score1 = int(await r.zscore(f"score:{self.room_code}", str(u1)) or 0)
         score2 = int(await r.zscore(f"score:{self.room_code}", str(u2)) or 0)
 
-        if score1 == score2:
+        if forced_winner_id is not None:
+            # 게임 중 이탈로 트리거된 강제 종료 (§7) — 점수 비교 없이 남은 유저가 승자
+            winner_id = forced_winner_id
+        elif score1 == score2:
             winner_id = None
         elif score1 > score2:
             winner_id = u1
@@ -334,6 +345,14 @@ class GameConsumer(AsyncWebsocketConsumer):
         })
 
     async def game_over(self, event):
+        # 상대방이 이탈해서 강제 종료된 경우, 이 컨슈머의 스폰 루프는 아직 자기 로컬
+        # `started_at` 기준 60초가 안 지나 계속 돌고 있을 수 있다 — 그대로 두면 나중에
+        # (Redis 키가 이미 정리된 뒤) 스스로 또 `_try_end_game()`을 호출하게 되므로,
+        # game.over를 받는 즉시 멈춘다.
+        spawn_task = getattr(self, "_spawn_task", None)
+        if spawn_task is not None:
+            spawn_task.cancel()
+
         await self._send_json({
             "type": "game.over",
             "scores": event["scores"],

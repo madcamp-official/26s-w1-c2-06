@@ -23,8 +23,10 @@ class SubmitScriptTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.client = redis.Redis(host="localhost", port=6379, decode_responses=True)
-        cls.script = cls.client.register_script(SUBMIT_SCRIPT)
+        # 이름을 `client`로 하면 Django SimpleTestCase가 매 테스트마다 인스턴스에
+        # 새로 얹는 HTTP 테스트 클라이언트(self.client)에 가려지므로 `redis`로 둔다.
+        cls.redis = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        cls.script = cls.redis.register_script(SUBMIT_SCRIPT)
 
     def setUp(self):
         self.room = f"test-{uuid.uuid4().hex[:8]}"
@@ -37,13 +39,13 @@ class SubmitScriptTests(SimpleTestCase):
         self.user_id = 1
 
     def tearDown(self):
-        self.client.delete(*self.keys)
+        self.redis.delete(*self.keys)
 
     def _seed_code(self, code_id, text, is_correct, started_ago_ms=1000):
-        self.client.hset(f"codes:{self.room}", code_id, f"{text}|{'1' if is_correct else '0'}")
-        self.client.hset(f"text_index:{self.room}", text, code_id)
+        self.redis.hset(f"codes:{self.room}", code_id, f"{text}|{'1' if is_correct else '0'}")
+        self.redis.hset(f"text_index:{self.room}", text, code_id)
         now_ms = int(time.time() * 1000)
-        self.client.set(f"game_started_at:{self.room}", now_ms - started_ago_ms)
+        self.redis.set(f"game_started_at:{self.room}", now_ms - started_ago_ms)
 
     def _submit(self, text, user_id=None):
         now_ms = int(time.time() * 1000)
@@ -59,9 +61,9 @@ class SubmitScriptTests(SimpleTestCase):
 
         self.assertEqual(result, 1)
         self.assertEqual(detail, "1")
-        self.assertEqual(self.client.zscore(f"score:{self.room}", str(self.user_id)), DELTA_CORRECT)
-        self.assertIsNone(self.client.hget(f"text_index:{self.room}", "print(x)"))
-        self.assertIsNone(self.client.hget(f"codes:{self.room}", "1"))
+        self.assertEqual(self.redis.zscore(f"score:{self.room}", str(self.user_id)), DELTA_CORRECT)
+        self.assertIsNone(self.redis.hget(f"text_index:{self.room}", "print(x)"))
+        self.assertIsNone(self.redis.hget(f"codes:{self.room}", "1"))
 
     def test_incorrect_submission_scores_minus_500_and_removes_code(self):
         self._seed_code("2", "print(x", is_correct=False)
@@ -70,7 +72,7 @@ class SubmitScriptTests(SimpleTestCase):
 
         self.assertEqual(result, -1)
         self.assertEqual(detail, "2")
-        self.assertEqual(self.client.zscore(f"score:{self.room}", str(self.user_id)), DELTA_INCORRECT)
+        self.assertEqual(self.redis.zscore(f"score:{self.room}", str(self.user_id)), DELTA_INCORRECT)
 
     def test_text_not_on_screen_is_no_match(self):
         self._seed_code("3", "def f():", is_correct=True)
@@ -79,25 +81,25 @@ class SubmitScriptTests(SimpleTestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "no_match")
-        self.assertIsNone(self.client.zscore(f"score:{self.room}", str(self.user_id)))
+        self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 매치가 안 났으니 기존 코드는 그대로 남아 있어야 한다
-        self.assertEqual(self.client.hget(f"text_index:{self.room}", "def f():"), "3")
+        self.assertEqual(self.redis.hget(f"text_index:{self.room}", "def f():"), "3")
 
     def test_already_claimed_code_is_too_late_and_does_not_double_score(self):
         self._seed_code("4", "return a + b", is_correct=True)
         # 다른 프로세스가 이미 이 code_id를 선점한 상태를 흉내낸다
-        self.client.set("claim:4", "other-user", nx=True, ex=30)
+        self.redis.set("claim:4", "other-user", nx=True, ex=30)
 
         result, detail = self._submit("return a + b")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "too_late")
-        self.assertIsNone(self.client.zscore(f"score:{self.room}", str(self.user_id)))
+        self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 선점 실패 시 매치/코드 데이터는 그대로 보존되어야 한다 (삭제/채점 금지)
-        self.assertEqual(self.client.hget(f"text_index:{self.room}", "return a + b"), "4")
-        self.assertIsNotNone(self.client.hget(f"codes:{self.room}", "4"))
+        self.assertEqual(self.redis.hget(f"text_index:{self.room}", "return a + b"), "4")
+        self.assertIsNotNone(self.redis.hget(f"codes:{self.room}", "4"))
 
-        self.client.delete("claim:4")
+        self.redis.delete("claim:4")
 
     def test_submission_after_game_duration_is_game_over(self):
         self._seed_code("5", "raise ValueError('bad')", is_correct=True, started_ago_ms=DURATION_MS + 1000)
@@ -106,9 +108,9 @@ class SubmitScriptTests(SimpleTestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "game_over")
-        self.assertIsNone(self.client.zscore(f"score:{self.room}", str(self.user_id)))
+        self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 60초 경과 후엔 매치 여부와 무관하게 아무 것도 건드리지 않는다
-        self.assertEqual(self.client.hget(f"text_index:{self.room}", "raise ValueError('bad')"), "5")
+        self.assertEqual(self.redis.hget(f"text_index:{self.room}", "raise ValueError('bad')"), "5")
 
 
 class GameEndLockTests(SimpleTestCase):
@@ -118,17 +120,17 @@ class GameEndLockTests(SimpleTestCase):
     databases = set()
 
     def setUp(self):
-        self.client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        self.redis = redis.Redis(host="localhost", port=6379, decode_responses=True)
         self.room = f"test-{uuid.uuid4().hex[:8]}"
         self.key = f"game_end_lock:{self.room}"
 
     def tearDown(self):
-        self.client.delete(self.key)
+        self.redis.delete(self.key)
 
     def test_only_one_process_can_acquire_end_lock(self):
-        first = self.client.set(self.key, "process-a", nx=True, ex=30)
-        second = self.client.set(self.key, "process-b", nx=True, ex=30)
+        first = self.redis.set(self.key, "process-a", nx=True, ex=30)
+        second = self.redis.set(self.key, "process-b", nx=True, ex=30)
 
         self.assertTrue(first)
         self.assertIsNone(second)
-        self.assertEqual(self.client.get(self.key), "process-a")
+        self.assertEqual(self.redis.get(self.key), "process-a")

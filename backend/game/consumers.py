@@ -6,9 +6,11 @@ import time
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
-from .models import Room
+from .models import GameResult, Profile, Room
 from .redis_client import get_redis
 from .redis_scripts import get_submit_script
 from .snippet_cache import clear_snippet_pool, get_snippet_pool
@@ -151,7 +153,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             now_ms = int(time.time() * 1000)
             elapsed = now_ms - started_at
             if elapsed >= duration_ms:
-                break  # 60초 경과 — 종료 처리는 별도 작업에서 구현
+                await self._try_end_game()
+                break
 
             tick = elapsed // SPAWN_TICK_MS
             if tick != last_tick:
@@ -194,6 +197,69 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "spawn_ts": int(time.time() * 1000),
             },
         )
+
+    # --- 게임 종료 및 최종 점수 반영 (§6) ---
+
+    async def _try_end_game(self):
+        r = get_redis()
+        acquired = await r.set(
+            f"game_end_lock:{self.room_code}", self.channel_name, nx=True, ex=30
+        )
+        if not acquired:
+            return  # 이미 다른 프로세스가 종료 처리 중이거나 끝냄
+
+        room = await self._get_room()
+        if room is None:
+            return
+
+        u1, u2 = room.player1_id, room.player2_id
+        score1 = int(await r.zscore(f"score:{self.room_code}", str(u1)) or 0)
+        score2 = int(await r.zscore(f"score:{self.room_code}", str(u2)) or 0)
+
+        if score1 == score2:
+            winner_id = None
+        elif score1 > score2:
+            winner_id = u1
+        else:
+            winner_id = u2
+
+        await self._persist_game_result(room.id, u1, u2, score1, score2, winner_id)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "game.over",
+                "scores": {str(u1): score1, str(u2): score2},
+                "winner_id": winner_id,
+            },
+        )
+
+        await r.delete(
+            f"codes:{self.room_code}",
+            f"text_index:{self.room_code}",
+            f"used_snippet_ids:{self.room_code}",
+            f"score:{self.room_code}",
+            f"game_started_at:{self.room_code}",
+        )
+        # spawn_lock:*, claim:*, game_end_lock:{room}은 이미 EX가 걸려 있어 자연 만료에 맡긴다
+
+    @database_sync_to_async
+    def _persist_game_result(self, room_id, user1_id, user2_id, score1, score2, winner_id):
+        with transaction.atomic():
+            obj, created = GameResult.objects.get_or_create(
+                room_id=room_id,
+                defaults={
+                    "user1_id": user1_id,
+                    "user2_id": user2_id,
+                    "score1": score1,
+                    "score2": score2,
+                    "winner_id": winner_id,
+                },
+            )
+            if created:
+                Profile.objects.filter(user_id=user1_id).update(total_score=F("total_score") + score1)
+                Profile.objects.filter(user_id=user2_id).update(total_score=F("total_score") + score2)
+                Room.objects.filter(id=room_id).update(status="finished", ended_at=timezone.now())
 
     # --- 제출 판정 (§5, 매칭+선점+채점+제거를 Lua 스크립트 하나로 원자 처리) ---
 
@@ -265,6 +331,13 @@ class GameConsumer(AsyncWebsocketConsumer):
             "correct": event["correct"],
             "user_id": event["user_id"],
             "delta": event["delta"],
+        })
+
+    async def game_over(self, event):
+        await self._send_json({
+            "type": "game.over",
+            "scores": event["scores"],
+            "winner_id": event["winner_id"],
         })
 
     async def room_update(self, event):

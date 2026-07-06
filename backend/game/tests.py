@@ -109,3 +109,26 @@ class SubmitScriptTests(SimpleTestCase):
         self.assertIsNone(self.client.zscore(f"score:{self.room}", str(self.user_id)))
         # 60초 경과 후엔 매치 여부와 무관하게 아무 것도 건드리지 않는다
         self.assertEqual(self.client.hget(f"text_index:{self.room}", "raise ValueError('bad')"), "5")
+
+
+class GameEndLockTests(SimpleTestCase):
+    """게임 종료 동시 트리거 방지(§6) — 같은 방에 대해 game_end_lock 획득 요청을
+    두 번 보냈을 때 정확히 하나만 통과하는지 확인한다."""
+
+    databases = set()
+
+    def setUp(self):
+        self.client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        self.room = f"test-{uuid.uuid4().hex[:8]}"
+        self.key = f"game_end_lock:{self.room}"
+
+    def tearDown(self):
+        self.client.delete(self.key)
+
+    def test_only_one_process_can_acquire_end_lock(self):
+        first = self.client.set(self.key, "process-a", nx=True, ex=30)
+        second = self.client.set(self.key, "process-b", nx=True, ex=30)
+
+        self.assertTrue(first)
+        self.assertIsNone(second)
+        self.assertEqual(self.client.get(self.key), "process-a")

@@ -30,6 +30,10 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = [h for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',') if h]
 
+# Cloudflare Tunnel/프록시 뒤에서 HTTPS로 서빙되므로, Django 4+ CSRF Origin 검증을
+# 통과하려면 실제 접속 오리진(scheme 포함)을 명시해야 한다.
+CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if o]
+
 
 # Application definition
 

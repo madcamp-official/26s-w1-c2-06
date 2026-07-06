@@ -35,12 +35,12 @@ Day 1                          Day 2              Day 3           Day 4
 - [x] 클럭 동기화 핸들러: `clock.sync` 메시지 받으면 서버 시각 실어 즉시 응답 (§9, stateless)
 
 **프론트엔드**
-- [ ] Vite + React 프로젝트 셋업, `/api`·`/ws` 프록시 설정
-- [ ] POST 하는 API 호출할 때 마다 쿠키에서 토큰을 읽어오는 공용 함수를 만들기. 
-- [ ] 회원가입/로그인 화면 (폼, 에러 메시지 표시 — 중복 아이디 등)
-- [ ] 로비 화면: 방 생성/참가(코드 입력), 방 안 유저 목록, "game start" 버튼(호스트에게만 노출)
-- [ ] WebSocket 연결: 방 접속 시 WS 오픈, 유저 목록/게임 시작 이벤트 수신 처리
-- [ ] 접속 직후 클럭 오프셋 측정 (§9): `clock.sync` 3~5회 왕복 → 최소 RTT 샘플로 `offset` 계산, 이후 낙하 위치 계산에 사용
+- [🙂‍↕️] Vite + React 프로젝트 셋업, `/api`·`/ws` 프록시 설정
+- [🙆‍♀️] POST 하는 API 호출할 때 마다 쿠키에서 토큰을 읽어오는 공용 함수를 만들기. 
+- [💪] 회원가입/로그인 화면 (폼, 에러 메시지 표시 — 중복 아이디 등)
+- [👍] 로비 화면: 방 생성/참가(코드 입력), 방 안 유저 목록, "game start" 버튼(호스트에게만 노출)
+- [😁] WebSocket 연결: 방 접속 시 WS 오픈, 유저 목록/게임 시작 이벤트 수신 처리
+- [🙂‍↕️] 접속 직후 클럭 오프셋 측정 (§9): `clock.sync` 3~5회 왕복 → 최소 RTT 샘플로 `offset` 계산, 이후 낙하 위치 계산에 사용
 
 **병렬 가능**: 모델/마이그레이션은 한 명이 먼저 끝내야 나머지가 그 위에서 작업 가능 — 이것만 순차로 먼저 처리. 이후 (a) 인증 API + 로그인/회원가입 화면, (b) 방 생성/참가 API + Consumer 골격 + 로비 화면을 백/프론트로 나눠서, 혹은 두 명이 한 기능씩 풀스택으로 맡아서 동시 진행. 하루치고 항목이 많으니 두 명 다 이 날은 풀로 투입하는 걸 권장.
 
@@ -58,11 +58,11 @@ Day 1                          Day 2              Day 3           Day 4
   - [ ] 포트 터널링 공부하기. VM 에서 열리는 포트가 20,443 같은 거밖에없는데 장고는 8000이라 문제생기나봄(내 추측)
 
 **프론트엔드**
-- [ ] 게임 화면: `code.spawn` 이벤트 수신 → 낙하 애니메이션 렌더링 (`spawn_ts` 기준으로 위치 계산, [architecture.md](./architecture.md) §5)
-- [ ] 텍스트 입력창 + Enter 제출 → WS 전송
-- [ ] 판정 결과 수신 → 매칭된 텍스트 제거, 점수 갱신 표시
-- [ ] 60초 타이머 표시 (`game_started_at` 기준 카운트다운)
-- [ ] `game.over` 이벤트 수신 → 결산 화면으로 전환
+- [🙆‍♀️] 게임 화면: `code.spawn` 이벤트 수신 → 낙하 애니메이션 렌더링 (`spawn_ts` 기준으로 위치 계산, [architecture.md](./architecture.md) §5)
+- [💪] 텍스트 입력창 + Enter 제출 → WS 전송
+- [💪] 판정 결과 수신 → 매칭된 텍스트 제거, 점수 갱신 표시
+- [🧘‍♀️] 60초 타이머 표시 (`game_started_at` 기준 카운트다운)
+- [🫳] `game.over` 이벤트 수신 → 결산 화면으로 전환
 
 **병렬 가능**: 백엔드는 스폰 로직과 판정 Lua 스크립트가 서로 다른 Redis 키를 다루므로 두 명이 동시 작업 가능 — 게임 종료 로직은 스폰+판정이 어느 정도 동작해야 테스트 가능하니 가장 나중에. 프론트는 낙하 애니메이션(스폰 이벤트 의존)과 입력창/제출 로직(판정 이벤트 의존)을 나눠서 각자 붙는 백엔드 항목이 준비되는 대로 붙여나간다. 이 날이 전체 스프린트에서 가장 무거우니 Day 1보다 시간을 넉넉히 잡는다.
 
@@ -78,7 +78,7 @@ Day 1                          Day 2              Day 3           Day 4
 
 **프론트엔드**
 - [ ] 결산 화면 마무리 (최종 점수/승패 표시)
-- [ ] 빌드 파이프라인 준비: `npm run build` → Django `STATICFILES_DIRS` 연결, WhiteNoise 설정, SPA 서빙용 Django 뷰 작성
+- [😁] 빌드 파이프라인 준비: `npm run build` → Django `STATICFILES_DIRS` 연결, WhiteNoise 설정, SPA 서빙용 Django 뷰 작성
 - [ ] UI 버그/엣지케이스 수정 (재접속 시 화면, 상대방 이탈 알림 등)
 
 **남은 버그 수정 여유 시간** (하루 중 절반 정도는 버퍼로 비워두기를 권장)
@@ -87,8 +87,8 @@ Day 1                          Day 2              Day 3           Day 4
 
 [backend-implementation.md](./backend-implementation.md) §1-2 절차를 그대로 따라간다.
 
-- [ ] KCLOUD VM 발급, SSH 접속
-- [ ] Docker 설치 → `docker-compose.yml`로 Postgres·Redis 실행 (로컬과 동일 파일)
+- [😁] KCLOUD VM 발급, SSH 접속
+- [🧘‍♀️] Docker 설치 → `docker-compose.yml`로 Postgres·Redis 실행 (로컬과 동일 파일)
 - [ ] 레포 배포: `git pull` → venv/`pip install` → `.env`에 운영용 설정
 - [ ] 프론트 빌드: `npm run build` → `collectstatic` 실행 (Django가 API/WS/정적 프론트를 전부 서빙)
 - [ ] systemd 유닛(`codebee.service`) 등록 → Django Channels 상시 구동

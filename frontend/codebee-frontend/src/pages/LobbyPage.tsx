@@ -25,6 +25,7 @@ function LobbyPage() {
   const [busy, setBusy] = useState(false);
 
   const pollTimer = useRef<number | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     if (!room || room.status !== 'waiting') return;
@@ -42,6 +43,21 @@ function LobbyPage() {
       if (pollTimer.current) window.clearInterval(pollTimer.current);
     };
   }, [room]);
+
+  // 방에 입장한 동안 연결을 유지하다가, 소켓이 끊기면(나가기 버튼 또는 탭 종료)
+  // 서버 disconnect() 핸들러가 대기 중 이탈 처리를 해준다 (backend-implementation.md §7).
+  useEffect(() => {
+    if (!room?.code) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/room/${room.code}/`);
+    wsRef.current = socket;
+
+    return () => {
+      socket.close();
+      wsRef.current = null;
+    };
+  }, [room?.code]);
 
   async function handleCreateRoom() {
     setError(null);
@@ -72,6 +88,12 @@ function LobbyPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleLeaveRoom() {
+    wsRef.current?.close();
+    setRoom(null);
+    setError(null);
   }
 
   async function handleLogout() {
@@ -153,6 +175,12 @@ function LobbyPage() {
           )}
           {room.status === 'waiting' && room.player2 && (
             <p className="room-hint">두 명 모두 입장했습니다. 곧 게임이 시작됩니다.</p>
+          )}
+
+          {room.status === 'waiting' && (
+            <button type="button" className="btn-link" onClick={handleLeaveRoom}>
+              방 나가기
+            </button>
           )}
         </div>
       )}

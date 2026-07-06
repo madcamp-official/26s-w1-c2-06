@@ -120,6 +120,32 @@ def join_room(request, code):
 
 
 @require_GET
+def leaderboard(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "not_authenticated"}, status=401)
+
+    # 랭킹은 0점 이하 유저를 제외하고 매긴다 — id를 타이브레이커로 둬서
+    # 동점자 순서가 요청마다 흔들리지 않게 한다.
+    ranked = list(
+        Profile.objects.select_related("user").filter(total_score__gt=0).order_by("-total_score", "id")
+    )
+
+    entries = [
+        {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
+        for i, p in enumerate(ranked[:5])
+    ]
+
+    me = None
+    for i, p in enumerate(ranked):
+        if p.user_id == request.user.id:
+            if i >= 5:  # 5위 밖일 때만 별도로 내려준다
+                me = {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
+            break
+
+    return JsonResponse({"entries": entries, "me": me})
+
+
+@require_GET
 def room_detail(request, code):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)

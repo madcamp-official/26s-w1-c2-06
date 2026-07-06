@@ -95,7 +95,7 @@ Django 연결 설정은 §1-1의 `DATABASES`/`CHANNEL_LAYERS`와 동일하되, `
 ```python
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
-    total_score = models.IntegerField(default=0)   # 전체 게임을 통틀은 누적 점수
+    total_score = models.IntegerField(default=0)   # 역대 한 판 최고 기록 (누적 아님)
 
 class Room(models.Model):
     STATUS_CHOICES = [("waiting", "waiting"), ("playing", "playing"), ("finished", "finished")]
@@ -105,17 +105,21 @@ class Room(models.Model):
     player1 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     player2 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
-    started_at = models.DateTimeField(null=True)                 # Redis game_started_at을 영속화한 값
+    started_at = models.DateTimeField(null=True)                 # Redis game_started_at을 영속화한 값 (재대결 시 최신 판 기준으로 덮어씀)
     ended_at = models.DateTimeField(null=True)
 
 class GameResult(models.Model):
-    room = models.OneToOneField(Room, on_delete=models.CASCADE)   # 방(매치)당 결과 1행
+    room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name="results")  # 재대결로 방당 여러 행 가능
+    started_at_ms = models.BigIntegerField(default=0)  # 이 판의 game_started_at epoch ms — 판 구분/idempotency key
     user1 = models.ForeignKey(User, on_delete=models.CASCADE, related_name="+")
     user2 = models.ForeignKey(User, on_delete=models.CASCADE, related_name="+")
     score1 = models.IntegerField()                  # user1의 이번 한 판 점수
     score2 = models.IntegerField()                  # user2의 이번 한 판 점수
     winner = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")  # null = 무승부
     ended_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["room", "started_at_ms"], name="unique_game_result_per_round")]
 
 class CodeSnippet(models.Model):
     text = models.CharField(max_length=255, unique=True)
@@ -125,7 +129,7 @@ class CodeSnippet(models.Model):
 
 `Room`은 어떤 유저가 이 방에 들어올 자격이 있는지를 DB로 검증하는 용도(재접속 시 인가)로 쓰고, 실제 낙하/점수 진행 상태는 여전히 Redis가 담당한다([architecture.md](./architecture.md) §6 참고). `CodeSnippet`은 특정 방에 종속되지 않는 전역 풀이다 — 어떤 스니펫이 어느 방에서 스폰됐는지는 Redis(`used_snippet_ids:{room}`)에서만 관리하고 DB엔 남기지 않는다.
 
-`GameResult`는 방(매치)당 1행 — 두 유저와 각자의 점수, 승자를 한 행에 같이 기록한다(`room`이 `OneToOneField`라 방당 정확히 1행만 존재). `Profile.total_score`는 이걸 넘어 유저가 지금까지 치른 모든 판을 합산한 값이다. 게임 종료 시 이 둘을 어떻게 채우는지는 §6 참고. 전체 스키마 요약과 ERD는 [README.md의 DB 스키마 섹션](../README.md#db-스키마) 참고.
+`GameResult`는 한 판(라운드)당 1행 — 재대결로 같은 방을 재사용하면 방당 여러 행이 쌓일 수 있어 `room`을 `ForeignKey`로 두고, `(room, started_at_ms)` 조합으로 판을 구분한다. `Profile.total_score`는 개별 판 기록과 별개로, 유저가 지금까지 치른 모든 판 중 **가장 높았던 한 판의 점수**(역대 최고 기록)다 — 누적합이 아니다. 게임 종료 시 이 둘을 어떻게 채우는지는 §6 참고. 전체 스키마 요약과 ERD는 [README.md의 DB 스키마 섹션](../README.md#db-스키마) 참고.
 
 한 유저의 전체 전적을 조회할 땐 `GameResult.objects.filter(Q(user1=user) | Q(user2=user))`처럼 두 필드를 다 확인해야 한다 — 유저별 1행 구조보다 조회가 한 단계 더 필요하지만, "이 매치의 결과"가 한 행에 온전히 담기는 걸 우선한 설계다.
 
@@ -257,6 +261,7 @@ SET game_started_at:{room} <now_ms> NX
 
 2. (성공한 프로세스만)
    a. ZRANGE score:{room} 0 -1 WITHSCORES        ← Redis에서 이번 판 최종 점수 읽기 (u1, u2 = 이 방의 두 유저)
+      GET game_started_at:{room}                 ← 삭제되기 전에 읽어서 started_at_ms로 사용 (이 판의 idempotency key)
    b. 점수 비교로 승자 계산:
       scores[u1] == scores[u2]  → winner_id = None (무승부)
       scores[u1] >  scores[u2]  → winner_id = u1
@@ -266,6 +271,7 @@ SET game_started_at:{room} <now_ms> NX
       with transaction.atomic():
           obj, created = GameResult.objects.get_or_create(
               room_id=room_id,
+              started_at_ms=started_at_ms,   # (room, started_at_ms) 조합이 이 판의 idempotency key
               defaults={
                   "user1_id": u1, "user2_id": u2,
                   "score1": scores[u1], "score2": scores[u2],
@@ -273,8 +279,9 @@ SET game_started_at:{room} <now_ms> NX
               },
           )
           if created:
-              Profile.objects.filter(user_id=u1).update(total_score=F("total_score") + scores[u1])
-              Profile.objects.filter(user_id=u2).update(total_score=F("total_score") + scores[u2])
+              # total_score는 누적합이 아니라 역대 최고 기록 — 이번 판 점수가 기존 기록보다 낮으면 그대로 둔다
+              Profile.objects.filter(user_id=u1).update(total_score=Greatest("total_score", scores[u1]))
+              Profile.objects.filter(user_id=u2).update(total_score=Greatest("total_score", scores[u2]))
               Room.objects.filter(id=room_id).update(status="finished", ended_at=timezone.now())
 
    d. group_send(room_group, {type: "game.over", scores: {...}, winner_id: winner_id})
@@ -290,7 +297,7 @@ SET game_started_at:{room} <now_ms> NX
 
 - **정확히 한 번만 실행됨:** `game_end_lock`이 §4 `spawn_lock`과 동일한 `SET NX` 패턴이라, 두 프로세스가 같은 틱에 종료를 감지해도 Redis가 하나만 통과시킨다
 - **막판 제출과의 레이스 없음:** §5 Lua 스크립트가 매 제출마다 자체적으로 60초 경과 여부를 체크하므로, 종료 처리가 시작된 후 도착한 제출은 `ZINCRBY` 자체가 실행되지 않는다 — 즉 2a에서 읽는 점수는 더 이상 바뀌지 않는 확정값이다
-- **크래시 내구성:** 락을 딴 프로세스가 2c(DB 기록) 전에 죽으면 `EX 30` 후 다른 프로세스가 재시도하지만, `GameResult.room`이 `OneToOneField`(방당 1행)라 재시도해도 같은 행을 다시 찾아올 뿐이고, `get_or_create`의 `created` 체크 덕분에 `total_score`가 중복 반영되지 않는다 (idempotent)
+- **크래시 내구성:** 락을 딴 프로세스가 2c(DB 기록) 전에 죽으면 `EX 30` 후 다른 프로세스가 재시도하지만, `(room, started_at_ms)`가 이 판의 유일 키라 재시도해도 같은 행을 다시 찾아올 뿐이고, `get_or_create`의 `created` 체크 덕분에 `total_score`가 중복 반영되지 않는다 (idempotent). `Greatest`로 갱신하는 최고 기록 자체도 같은 값을 다시 적용하면 결과가 바뀌지 않는 멱등 연산이라 이중 안전하다
 - **`Room` 상태 갱신 누락 방지:** `Room.status="finished"`/`ended_at` 갱신도 `if created:` 블록 안에서 같이 처리한다 — `GameResult` 생성과 같은 조건에 묶여 있어서 재시도 시 중복 갱신되지 않고, 게임이 끝났는데 `Room.status`가 계속 `"playing"`으로 남는 일이 없다
 
 ## 7. 방 생명주기 — 입장/이탈/방장 위임

@@ -9,12 +9,13 @@ import time
 import uuid
 
 import redis
+from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TransactionTestCase
 
 from .consumers import GameConsumer
-from .models import CodeSnippet, Profile, Room
+from .models import CodeSnippet, GameResult, Profile, Room
 from .redis_scripts import SUBMIT_SCRIPT
 from .snippet_cache import clear_snippet_pool
 
@@ -223,3 +224,55 @@ class GameConsumerIntegrationTests(TransactionTestCase):
 
         await comm1.disconnect()
         await comm2.disconnect()
+
+
+class GameResultRematchPersistenceTests(TransactionTestCase):
+    """재대결로 같은 room에 여러 판이 쌓일 때 GameResult 저장이 올바른지 검증한다.
+
+    started_at_ms가 판을 구분하는 idempotency key이므로(§6, models.GameResult 참고),
+    (1) 판마다 새 행이 쌓이며 total_score가 누적이 아니라 역대 최고 기록으로 남는지,
+    (2) 크래시 재시도로 같은 판(started_at_ms 동일)이 두 번 들어와도 중복 반영되지
+        않는지를 확인한다.
+    """
+
+    def setUp(self):
+        self.user1 = User.objects.create_user(username=f"p1-{uuid.uuid4().hex[:6]}", password="pw12345")
+        self.user2 = User.objects.create_user(username=f"p2-{uuid.uuid4().hex[:6]}", password="pw12345")
+        Profile.objects.create(user=self.user1)
+        Profile.objects.create(user=self.user2)
+        self.room = Room.objects.create(
+            code=f"RM{uuid.uuid4().hex[:6].upper()}", player1=self.user1, player2=self.user2, status="playing"
+        )
+        self.consumer = GameConsumer()
+        self.consumer.room_code = self.room.code
+
+    async def _persist(self, started_at_ms, score1, score2, winner_id):
+        await self.consumer._persist_game_result(
+            self.room.id, started_at_ms, self.user1.id, self.user2.id, score1, score2, winner_id
+        )
+
+    @database_sync_to_async
+    def _result_count(self):
+        return GameResult.objects.filter(room_id=self.room.id).count()
+
+    @database_sync_to_async
+    def _total_score(self, user):
+        return Profile.objects.get(user_id=user.id).total_score
+
+    async def test_rematch_rounds_create_separate_rows_and_keep_best_score(self):
+        await self._persist(1_000, 500, -500, self.user1.id)
+        await self._persist(2_000, 200, 900, self.user1.id)
+
+        self.assertEqual(await self._result_count(), 2)
+        # user1: 두 판 중 최고인 500이 남아야 한다(두 번째 판의 200으로 낮아지면 안 됨)
+        self.assertEqual(await self._total_score(self.user1), 500)
+        # user2: 두 판 중 최고인 900이 남아야 한다
+        self.assertEqual(await self._total_score(self.user2), 900)
+
+    async def test_retrying_same_round_does_not_double_count(self):
+        await self._persist(1_000, 500, -500, self.user1.id)
+        # 종료 처리 도중 크래시 후 다른 프로세스가 같은 판을 재시도하는 상황을 흉내낸다
+        await self._persist(1_000, 500, -500, self.user1.id)
+
+        self.assertEqual(await self._result_count(), 1)
+        self.assertEqual(await self._total_score(self.user1), 500)

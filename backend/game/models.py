@@ -6,7 +6,7 @@ User = settings.AUTH_USER_MODEL
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
-    total_score = models.IntegerField(default=0)  # 전체 게임을 통틀은 누적 점수
+    total_score = models.IntegerField(default=0)  # 역대 한 판 최고 기록 (누적 아님)
 
 
 class Room(models.Model):
@@ -26,7 +26,11 @@ class Room(models.Model):
 
 
 class GameResult(models.Model):
-    room = models.OneToOneField(Room, on_delete=models.CASCADE)  # 방(매치)당 결과 1행
+    # 재대결(같은 room 재사용)로 한 room에 여러 판이 쌓일 수 있어 ForeignKey로 둔다.
+    room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name="results")
+    # 이 판의 game_started_at epoch ms — room 재사용 시 판을 구분하고, 종료 처리
+    # 크래시 재시도의 idempotency key로 쓴다(room만으로는 더 이상 유일하지 않음).
+    started_at_ms = models.BigIntegerField(default=0)
     user1 = models.ForeignKey(User, on_delete=models.CASCADE, related_name="+")
     user2 = models.ForeignKey(User, on_delete=models.CASCADE, related_name="+")
     score1 = models.IntegerField()  # user1의 이번 한 판 점수
@@ -35,6 +39,11 @@ class GameResult(models.Model):
         User, null=True, on_delete=models.SET_NULL, related_name="+"
     )  # null = 무승부
     ended_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["room", "started_at_ms"], name="unique_game_result_per_round"),
+        ]
 
 
 class CodeSnippet(models.Model):

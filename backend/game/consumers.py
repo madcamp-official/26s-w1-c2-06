@@ -7,7 +7,7 @@ import time
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.db import transaction
-from django.db.models import F
+from django.db.models.functions import Greatest
 from django.utils import timezone
 
 from .models import GameResult, Profile, Room
@@ -70,6 +70,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._handle_clock_sync(data)
         elif msg_type == "code.submit":
             await self._handle_submit(data)
+        elif msg_type == "rematch":
+            await self._handle_rematch()
 
     # --- 클럭 동기화 (§9, stateless — 상태 저장 없이 즉시 응답만) ---
 
@@ -152,6 +154,27 @@ class GameConsumer(AsyncWebsocketConsumer):
     def _set_room_playing(self):
         Room.objects.filter(code=self.room_code).update(status="playing", started_at=timezone.now())
 
+    # --- 재대결 (room 유지, 호스트 트리거) ---
+
+    async def _handle_rematch(self):
+        room = await self._get_room()
+        if room is None:
+            return
+
+        if room.player1_id != self.user.id:
+            await self._send_json({"type": "error", "error": "not_host"})
+            return
+        if room.status != "finished":
+            await self._send_json({"type": "error", "error": "room_not_finished"})
+            return
+
+        await self._reset_room_to_waiting()
+        await self.channel_layer.group_send(self.room_group_name, {"type": "room.update"})
+
+    @database_sync_to_async
+    def _reset_room_to_waiting(self):
+        Room.objects.filter(code=self.room_code).update(status="waiting", started_at=None, ended_at=None)
+
     # --- 스폰 틱 로직 (§4, "스폰도 선점 문제") ---
 
     async def _spawn_tick_loop(self, started_at, duration_ms):
@@ -220,6 +243,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         if room is None:
             return
 
+        # 재대결로 같은 room에 여러 판이 쌓일 수 있어, 이 판을 구분하는 idempotency
+        # key로 game_started_at을 함께 쓴다(room만으로는 더 이상 유일하지 않음, §6 참고).
+        started_at_raw = await r.get(f"game_started_at:{self.room_code}")
+        started_at_ms = int(started_at_raw) if started_at_raw is not None else int(time.time() * 1000)
+
         u1, u2 = room.player1_id, room.player2_id
         score1 = int(await r.zscore(f"score:{self.room_code}", str(u1)) or 0)
         score2 = int(await r.zscore(f"score:{self.room_code}", str(u2)) or 0)
@@ -234,7 +262,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         else:
             winner_id = u2
 
-        await self._persist_game_result(room.id, u1, u2, score1, score2, winner_id)
+        await self._persist_game_result(room.id, started_at_ms, u1, u2, score1, score2, winner_id)
 
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -255,10 +283,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         # spawn_lock:*, claim:*, game_end_lock:{room}은 이미 EX가 걸려 있어 자연 만료에 맡긴다
 
     @database_sync_to_async
-    def _persist_game_result(self, room_id, user1_id, user2_id, score1, score2, winner_id):
+    def _persist_game_result(self, room_id, started_at_ms, user1_id, user2_id, score1, score2, winner_id):
         with transaction.atomic():
             obj, created = GameResult.objects.get_or_create(
                 room_id=room_id,
+                started_at_ms=started_at_ms,
                 defaults={
                     "user1_id": user1_id,
                     "user2_id": user2_id,
@@ -268,8 +297,13 @@ class GameConsumer(AsyncWebsocketConsumer):
                 },
             )
             if created:
-                Profile.objects.filter(user_id=user1_id).update(total_score=F("total_score") + score1)
-                Profile.objects.filter(user_id=user2_id).update(total_score=F("total_score") + score2)
+                # total_score는 누적합이 아니라 유저의 역대 한 판 최고 기록이다
+                Profile.objects.filter(user_id=user1_id).update(
+                    total_score=Greatest("total_score", score1)
+                )
+                Profile.objects.filter(user_id=user2_id).update(
+                    total_score=Greatest("total_score", score2)
+                )
                 Room.objects.filter(id=room_id).update(status="finished", ended_at=timezone.now())
 
     # --- 제출 판정 (§5, 매칭+선점+채점+제거를 Lua 스크립트 하나로 원자 처리) ---

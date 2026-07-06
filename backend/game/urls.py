@@ -11,4 +11,5 @@ urlpatterns = [
     path("rooms/", views.create_room),
     path("rooms/<str:code>/", views.room_detail),
     path("rooms/<str:code>/join/", views.join_room),
+    path("leaderboard/", views.leaderboard),
 ]

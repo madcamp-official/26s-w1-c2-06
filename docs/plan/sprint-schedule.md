@@ -49,9 +49,9 @@ Day 1                          Day 2              Day 3           Day 4
 **백엔드**
 - [x] 스폰 틱 로직 (§4): `spawn_lock` 선점, 로컬 스니펫 풀에서 후보 선택, `codes`/`text_index` Redis 기록, `code.spawn` 브로드캐스트
 - [x] 제출 판정 Lua 스크립트 연동 (§5): 유저 제출 수신 → 스크립트 실행 → 결과 브로드캐스트
-- [ ] 게임 종료 로직 (§6): 60초 경과 체크, `game_end_lock`, 점수 비교로 `winner` 계산, `GameResult`/`Profile.total_score` 기록, Redis 키 정리, `game.over` 브로드캐스트
-- [ ] 게임 중 이탈 강제 종료 (§7 후반부): `disconnect()` 시 즉시 `game_end_lock` 트리거, 남은 유저를 `winner`로 강제 지정
-- [ ] **자동화 테스트**: 이 프로젝트에서 가장 위험한 코드가 오늘 나오는 만큼, 구현과 같이 짠다 (나중에 몰아서 안 함)
+- [x] 게임 종료 로직 (§6): 60초 경과 체크, `game_end_lock`, 점수 비교로 `winner` 계산, `GameResult`/`Profile.total_score` 기록, Redis 키 정리, `game.over` 브로드캐스트
+- [x] 게임 중 이탈 강제 종료 (§7 후반부): `disconnect()` 시 즉시 `game_end_lock` 트리거, 남은 유저를 `winner`로 강제 지정
+- [x] **자동화 테스트**: 이 프로젝트에서 가장 위험한 코드가 오늘 나오는 만큼, 구현과 같이 짠다 (나중에 몰아서 안 함)
   - Lua 스크립트 단위 테스트 (실제 로컬 Redis에 대고 `EVAL` 직접 호출 — 정답/오답/이미 선점됨/게임종료 후 4가지 케이스)
   - Consumer 통합 테스트 (Channels `WebsocketCommunicator`로 connect→spawn→submit→score 흐름 검증)
   - 게임 종료 동시 트리거 테스트 (같은 방에 대해 `game_end_lock` 획득 요청 2번 보냈을 때 정확히 하나만 통과하는지)

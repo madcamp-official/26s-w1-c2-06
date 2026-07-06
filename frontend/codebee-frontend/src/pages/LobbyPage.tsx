@@ -6,6 +6,7 @@ import { getErrorMessage } from '../api/client';
 import { createRoom, getLeaderboard, getRoom, joinRoom } from '../api/rooms';
 import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
+import Logo from '../components/Logo';
 import { useAuthStore } from '../store/authStore';
 import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard, ScorePop } from '../types';
 import './LobbyPage.css';
@@ -337,13 +338,33 @@ function LobbyPage() {
     : undefined;
   const opponentFinalScore = opponentFinalEntry ? opponentFinalEntry[1] : 0;
 
+  const resultOutcome: 'win' | 'lose' | 'draw' | 'unknown' = !gameOver
+    ? 'unknown'
+    : gameOver.winnerId === null
+      ? 'draw'
+      : myUserId !== null
+        ? gameOver.winnerId === myUserId
+          ? 'win'
+          : 'lose'
+        : 'unknown';
+
+  function resultSlotClass(forMe: boolean): string {
+    if (!gameOver || gameOver.winnerId === null) return '';
+    const opponentUserId = opponentFinalEntry ? Number(opponentFinalEntry[0]) : null;
+    const isWinner = forMe ? gameOver.winnerId === myUserId : gameOver.winnerId === opponentUserId;
+    return isWinner ? 'result-winner' : 'result-loser';
+  }
+
   return (
     <div className="lobby-page">
       <header className="lobby-header">
-        <span>{user?.username}님 환영합니다</span>
-        <button type="button" className="btn-link" onClick={handleLogout}>
-          로그아웃
-        </button>
+        <Logo />
+        <div className="lobby-header-user">
+          <span>{user?.username}님 환영합니다</span>
+          <button type="button" className="btn-link" onClick={handleLogout}>
+            로그아웃
+          </button>
+        </div>
       </header>
 
       {!room && (
@@ -437,25 +458,35 @@ function LobbyPage() {
       )}
 
       {room && gameOver && (
-        <div className="room-status">
-          <h2>게임 종료</h2>
+        <div className={`room-status result-${resultOutcome}`}>
+          <div className={`result-banner ${resultOutcome}`}>
+            {resultOutcome === 'win'
+              ? 'YOU WIN!'
+              : resultOutcome === 'lose'
+                ? 'YOU LOSE'
+                : resultOutcome === 'draw'
+                  ? 'DRAW'
+                  : 'GAME OVER'}
+          </div>
           <p className="room-hint">
-            {gameOver.winnerId === null
+            {resultOutcome === 'draw'
               ? '무승부입니다.'
-              : myUserId !== null
-                ? gameOver.winnerId === myUserId
-                  ? '승리했습니다!'
-                  : '패배했습니다.'
-                : '게임이 종료되었습니다.'}
+              : resultOutcome === 'win'
+                ? '승리했습니다!'
+                : resultOutcome === 'lose'
+                  ? '패배했습니다.'
+                  : '게임이 종료되었습니다.'}
           </p>
           <div className="player-slots">
-            <div className="player-slot filled">
+            <div className={`player-slot filled ${resultSlotClass(true)}`}>
               <span className="player-role">내 점수</span>
-              <span className="player-name">{myFinalScore}</span>
+              <span className="player-name result-score">{myFinalScore}</span>
+              {resultSlotClass(true) === 'result-winner' && <span className="winner-badge">WINNER</span>}
             </div>
-            <div className="player-slot filled">
+            <div className={`player-slot filled ${resultSlotClass(false)}`}>
               <span className="player-role">상대 점수</span>
-              <span className="player-name">{opponentFinalScore}</span>
+              <span className="player-name result-score">{opponentFinalScore}</span>
+              {resultSlotClass(false) === 'result-winner' && <span className="winner-badge">WINNER</span>}
             </div>
           </div>
 

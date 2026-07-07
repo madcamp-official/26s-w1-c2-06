@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
+from . import tier
 from .models import CodeSnippet, Profile, Room
 from .room_codes import generate_room_code
 
@@ -62,6 +63,19 @@ def me(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
     return JsonResponse({"id": request.user.id, "username": request.user.username})
+
+
+@require_GET
+def my_tier(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "not_authenticated"}, status=401)
+
+    profile = Profile.objects.get(user_id=request.user.id)
+    return JsonResponse({
+        "tier": profile.tier,
+        "tier_score": profile.tier_score,
+        "rating": tier.rating(profile.tier, profile.tier_score),
+    })
 
 
 def _room_payload(room):

@@ -13,9 +13,9 @@ import redis
 from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase, override_settings
 
-from . import matchmaking_scripts, redis_client, tier
+from . import matchmaking_scripts, redis_client, redis_scripts, tier
 from .consumers import GameConsumer, compute_correct_score
 from .matchmaking_consumer import QUEUE_KEY, QUEUED_AT_KEY, MatchmakingConsumer
 from .matchmaking_scripts import MATCH_SCRIPT
@@ -54,10 +54,12 @@ class SubmitScriptTests(SimpleTestCase):
     def tearDown(self):
         self.redis.delete(*self.keys)
 
-    def _seed_code(self, code_id, text, is_correct, started_ago_ms=1000, code_age_ms=100, fall_duration_ms=9000):
+    def _seed_code(
+        self, code_id, text, is_correct, started_ago_ms=1000, code_age_ms=100, fall_duration_ms=9000, item=""
+    ):
         now_ms = int(time.time() * 1000)
         spawn_ts = now_ms - code_age_ms
-        packed = "\x01".join([text, "1" if is_correct else "0", str(spawn_ts), str(fall_duration_ms)])
+        packed = "\x01".join([text, "1" if is_correct else "0", str(spawn_ts), str(fall_duration_ms), item])
         self.redis.hset(f"codes:{self.room}", code_id, packed)
         self.redis.hset(f"text_index:{self.room}", text, code_id)
         self.redis.set(f"game_started_at:{self.room}", now_ms - started_ago_ms)
@@ -80,30 +82,42 @@ class SubmitScriptTests(SimpleTestCase):
     def test_correct_submission_scores_plus_500_and_removes_code(self):
         self._seed_code("1", "print(x)", is_correct=True)
 
-        result, detail = self._submit("print(x)")
+        result, detail, item = self._submit("print(x)")
 
         self.assertEqual(result, 1)
         self.assertEqual(detail, "1")
+        self.assertEqual(item, "")  # 아이템 안 붙은 경우
         self.assertEqual(self.redis.zscore(f"score:{self.room}", str(self.user_id)), DELTA_CORRECT)
         self.assertIsNone(self.redis.hget(f"text_index:{self.room}", "print(x)"))
         self.assertIsNone(self.redis.hget(f"codes:{self.room}", "1"))
 
+    def test_correct_submission_with_item_returns_item(self):
+        self._seed_code("1b", "print(y)", is_correct=True, item="ink")
+
+        result, detail, item = self._submit("print(y)")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(detail, "1b")
+        self.assertEqual(item, "ink")
+
     def test_incorrect_submission_scores_minus_500_and_removes_code(self):
         self._seed_code("2", "print(x", is_correct=False)
 
-        result, detail = self._submit("print(x")
+        result, detail, item = self._submit("print(x")
 
         self.assertEqual(result, -1)
         self.assertEqual(detail, "2")
+        self.assertEqual(item, "")  # 아이템은 정답에만 붙으므로 오답은 항상 빈 문자열
         self.assertEqual(self.redis.zscore(f"score:{self.room}", str(self.user_id)), DELTA_INCORRECT)
 
     def test_text_not_on_screen_is_no_match(self):
         self._seed_code("3", "def f():", is_correct=True)
 
-        result, detail = self._submit("이 텍스트는 화면에 없음")
+        result, detail, item = self._submit("이 텍스트는 화면에 없음")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "no_match")
+        self.assertEqual(item, "")
         self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 매치가 안 났으니 기존 코드는 그대로 남아 있어야 한다
         self.assertEqual(self.redis.hget(f"text_index:{self.room}", "def f():"), "3")
@@ -114,10 +128,11 @@ class SubmitScriptTests(SimpleTestCase):
         claim_key = f"claim:{self.room}:4"
         self.redis.set(claim_key, "other-user", nx=True, ex=30)
 
-        result, detail = self._submit("return a + b")
+        result, detail, item = self._submit("return a + b")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "too_late")
+        self.assertEqual(item, "")
         self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 선점 실패 시 매치/코드 데이터는 그대로 보존되어야 한다 (삭제/채점 금지)
         self.assertEqual(self.redis.hget(f"text_index:{self.room}", "return a + b"), "4")
@@ -128,10 +143,11 @@ class SubmitScriptTests(SimpleTestCase):
     def test_submission_after_game_duration_is_game_over(self):
         self._seed_code("5", "raise ValueError('bad')", is_correct=True, started_ago_ms=DURATION_MS + 1000)
 
-        result, detail = self._submit("raise ValueError('bad')")
+        result, detail, item = self._submit("raise ValueError('bad')")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "game_over")
+        self.assertEqual(item, "")
         self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 60초 경과 후엔 매치 여부와 무관하게 아무 것도 건드리지 않는다
         self.assertEqual(self.redis.hget(f"text_index:{self.room}", "raise ValueError('bad')"), "5")
@@ -142,10 +158,11 @@ class SubmitScriptTests(SimpleTestCase):
         # 오르는" 버그가 재현된다.
         self._seed_code("6", "def g():", is_correct=True, code_age_ms=10_000, fall_duration_ms=9000)
 
-        result, detail = self._submit("def g():")
+        result, detail, item = self._submit("def g():")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "expired")
+        self.assertEqual(item, "")
         self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
         # 만료된 코드는 더 이상 매치되면 안 되므로 인덱스/코드 해시에서 함께 제거된다
         self.assertIsNone(self.redis.hget(f"text_index:{self.room}", "def g():"))
@@ -283,6 +300,12 @@ class GameConsumerIntegrationTests(TransactionTestCase):
     """
 
     def setUp(self):
+        # 전역 비동기 Redis 클라이언트(redis_client.get_redis())가 이전 async 테스트의
+        # (이미 닫힌) 이벤트 루프에 묶인 채로 재사용되면서 깨지는 걸 막는다 — 이 클래스에
+        # async 테스트 메서드가 두 개 이상이라 매번 리셋 필요 (MatchmakingConsumerIntegrationTests
+        # 에서 같은 이유로 이미 쓰던 패턴).
+        redis_client._redis_client = None
+        redis_scripts._submit_script = None  # 위와 동일한 이유 — Script 객체도 옛 클라이언트를 들고 있다
         self.room_code = f"RM{uuid.uuid4().hex[:6].upper()}"
         self.user1 = User.objects.create_user(username=f"alice-{uuid.uuid4().hex[:6]}", password="pw12345")
         self.user2 = User.objects.create_user(username=f"bob-{uuid.uuid4().hex[:6]}", password="pw12345")
@@ -348,8 +371,44 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         expected_delta = compute_correct_score(spawn1["text"]) if is_correct else DELTA_INCORRECT
         self.assertEqual(result1["delta"], expected_delta)
 
-        await comm1.disconnect()
-        await comm2.disconnect()
+    async def test_item_forced_probability_attaches_to_correct_spawn_and_relays_through_result(self):
+        # ITEM_ATTACH_PROB=1.0으로 강제해서 정답 스니펫엔 반드시 아이템이 붙게 만들고,
+        # 오답 스니펫엔 절대 안 붙는지까지 같이 확인한다 (스폰 → code.spawn → 제출 →
+        # code.result 전체 경로에 item이 실제로 실려가는지 검증 — Lua 스크립트 단위
+        # 테스트는 이미 있던 item을 다루는 것만 확인하므로, _try_spawn의 확률 로직
+        # 자체는 여기서만 커버된다).
+        with override_settings(ITEM_ATTACH_PROB=1.0):
+            comm1 = await self._connect(self.user1)
+            comm2 = await self._connect(self.user2)
+
+            await comm1.send_to(text_data=json.dumps({"type": "game.start"}))
+            await comm1.receive_json_from(timeout=2)  # game.starting
+            await comm2.receive_json_from(timeout=2)
+            await comm1.receive_json_from(timeout=5)  # game.start (카운트다운 이후)
+            await comm2.receive_json_from(timeout=5)
+
+            # 스니펫 풀이 2개(정답/오답)뿐이라, 틱마다 하나씩 총 2번 스폰된다
+            spawn1 = await comm1.receive_json_from(timeout=2)
+            spawn2 = await comm1.receive_json_from(timeout=2)
+
+            for spawn in (spawn1, spawn2):
+                if spawn["text"] == self.correct_text:
+                    self.assertIn(spawn["item"], ("alert", "ink"))
+                    correct_code_id = spawn["code_id"]
+                else:
+                    self.assertIsNone(spawn["item"])
+
+            await comm1.send_to(
+                text_data=json.dumps({"type": "code.submit", "text": self.correct_text})
+            )
+            result1 = await comm1.receive_json_from(timeout=2)
+            self.assertEqual(result1["code_id"], correct_code_id)
+            self.assertIn(result1["item"], ("alert", "ink"))
+
+            await comm2.receive_json_from(timeout=2)  # comm2도 동일한 code.result를 받음(큐 비움)
+
+            await comm1.disconnect()
+            await comm2.disconnect()
 
 
 class MatchmakingConsumerIntegrationTests(TransactionTestCase):

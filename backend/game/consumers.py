@@ -17,8 +17,17 @@ from .snippet_cache import clear_snippet_pool, get_snippet_pool
 
 GAME_DURATION_MS = 60000
 SPAWN_TICK_MS = 500
-SCORE_DELTA_CORRECT = 500
 SCORE_DELTA_INCORRECT = -500
+
+# 정답 점수는 맞힌 스니펫 길이에 비례한다(길수록 더 어려우니 더 큰 점수) — 낙하 시간
+# 공식(compute_fall_duration_ms)과 같은 선형 + 상한 패턴을 쓴다.
+SCORE_CORRECT_BASE = 200
+SCORE_CORRECT_PER_CHAR = 20
+SCORE_CORRECT_MAX = 1000
+
+
+def compute_correct_score(text):
+    return min(SCORE_CORRECT_MAX, SCORE_CORRECT_BASE + len(text) * SCORE_CORRECT_PER_CHAR)
 
 # codes:{room} 해시 값 패킹 구분자 — "|"는 코드 텍스트 자체에 나올 수 있어(예:
 # `Optional[int] | None`) 쓰지 않는다. 제어문자라 실제 코드 스니펫에 나올 일이 없다.
@@ -335,6 +344,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         script = get_submit_script()
         now_ms = int(time.time() * 1000)
+        correct_delta = compute_correct_score(text)
         result, detail = await script(
             keys=[
                 f"text_index:{self.room_code}",
@@ -345,7 +355,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             args=[
                 text,
                 self.user.id,
-                SCORE_DELTA_CORRECT,
+                correct_delta,
                 SCORE_DELTA_INCORRECT,
                 now_ms,
                 GAME_DURATION_MS,
@@ -366,7 +376,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "code_id": detail,
                 "correct": result == 1,
                 "user_id": self.user.id,
-                "delta": SCORE_DELTA_CORRECT if result == 1 else SCORE_DELTA_INCORRECT,
+                "delta": correct_delta if result == 1 else SCORE_DELTA_INCORRECT,
             },
         )
 

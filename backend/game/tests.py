@@ -14,7 +14,7 @@ from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TransactionTestCase
 
-from .consumers import GameConsumer
+from .consumers import GameConsumer, compute_correct_score
 from .models import CodeSnippet, GameResult, Profile, Room
 from .redis_scripts import SUBMIT_SCRIPT
 from .snippet_cache import clear_snippet_pool
@@ -237,7 +237,8 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         self.assertEqual(result1["user_id"], self.user1.id)
         is_correct = spawn1["text"] == self.correct_text
         self.assertEqual(result1["correct"], is_correct)
-        self.assertEqual(result1["delta"], DELTA_CORRECT if is_correct else DELTA_INCORRECT)
+        expected_delta = compute_correct_score(spawn1["text"]) if is_correct else DELTA_INCORRECT
+        self.assertEqual(result1["delta"], expected_delta)
 
         await comm1.disconnect()
         await comm2.disconnect()

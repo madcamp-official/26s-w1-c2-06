@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, FormEvent } from 'react';
 import type { FallingCode, ScoreBoard, ScorePop } from '../types';
+import BeeIcon from './BeeIcon';
 import './GameScreen.css';
 
 // 판정 결과가 온 뒤 코드가 점수판으로 날아가며 사라지는 연출 시간(ms).
@@ -54,19 +55,6 @@ function renderCodeText(text: string, typedInput: string) {
       <span className="code-typed">{text.slice(0, typedInput.length)}</span>
       {text.slice(typedInput.length)}
     </>
-  );
-}
-
-// 코드를 물고 나르는 벌 아이콘 — 픽셀 느낌의 각진 사각형으로만 구성.
-function BeeIcon({ flapping }: { flapping?: boolean }) {
-  return (
-    <svg className={`bee-icon ${flapping ? 'flapping' : ''}`} viewBox="0 0 24 24" aria-hidden="true">
-      <rect className="bee-wing bee-wing-l" x="1" y="7" width="7" height="5" />
-      <rect className="bee-wing bee-wing-r" x="16" y="7" width="7" height="5" />
-      <rect className="bee-body" x="7" y="8" width="10" height="9" />
-      <rect className="bee-stripe" x="7" y="10" width="10" height="2" />
-      <rect className="bee-stripe" x="7" y="14" width="10" height="2" />
-    </svg>
   );
 }
 
@@ -251,7 +239,11 @@ function GameScreen({
       // 입력창 왼쪽 끝(border-box) 기준 텍스트 시작 위치를 그대로 나타낸다.
       measureRef.current.textContent = next.slice(0, -1);
       const inputRect = inputElRef.current.getBoundingClientRect();
-      const x = inputRect.left + measureRef.current.offsetWidth;
+      // 텍스트가 입력창 너비를 넘기면 브라우저가 안을 왼쪽으로 스크롤해서 커서를
+      // 오른쪽 끝에 고정해버린다 — measureRef는 이 스크롤을 모르고 계속 넓어지기만
+      // 하므로, 입력창 오른쪽 끝(테두리+패딩 뺀 안쪽 경계)을 넘지 않게 잡아준다.
+      const maxX = inputRect.right - 17;
+      const x = Math.min(inputRect.left + measureRef.current.offsetWidth, maxX);
       const y = inputRect.top + inputRect.height / 2;
       const id = `${Date.now()}-${Math.random()}`;
       setTypingBursts((prev) => [...prev, { id, x, y, particles: randomTypingParticles() }]);
@@ -423,7 +415,7 @@ function GameScreen({
         </button>
       </form>
 
-      <button type="button" className="btn-link" onClick={onForfeit}>
+      <button type="button" className="btn-link forfeit-btn" onClick={onForfeit}>
         게임 포기하기
       </button>
     </div>

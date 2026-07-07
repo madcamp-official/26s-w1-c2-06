@@ -1,0 +1,21 @@
+.cursor-bee {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.cursor-bee .bee-icon {
+  width: 26px;
+  height: 26px;
+}
+
+@media (pointer: coarse) {
+  /* 터치 기기엔 마우스 커서 개념이 없으므로 표시하지 않는다 */
+  .cursor-bee {
+    display: none;
+  }
+}

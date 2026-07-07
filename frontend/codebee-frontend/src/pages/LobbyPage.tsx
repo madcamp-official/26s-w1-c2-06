@@ -42,6 +42,8 @@ function LobbyPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [showRules, setShowRules] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   // --- 인게임 상태 (WebSocket 이벤트로만 갱신됨, backend-implementation.md §4~§6) ---
   const [fallingCodes, setFallingCodes] = useState<FallingCode[]>([]);
@@ -105,6 +107,15 @@ function LobbyPage() {
         // 조회 실패는 조용히 무시 — 리더보드는 부가 정보라 화면 전체를 막을 이유가 없다
       });
   }, []);
+
+  useEffect(() => {
+    if (!showRules) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowRules(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showRules]);
 
   const myUserId = user?.id ?? null;
 
@@ -300,6 +311,19 @@ function LobbyPage() {
     sendMessage({ type: 'game.start', difficulty });
   }
 
+  function handleCopyRoomCode() {
+    if (!room) return;
+    navigator.clipboard
+      .writeText(room.code)
+      .then(() => {
+        setCodeCopied(true);
+        window.setTimeout(() => setCodeCopied(false), 1500);
+      })
+      .catch(() => {
+        // 클립보드 권한이 없는 등 실패 시 조용히 무시 — 코드 자체는 화면에 그대로 보임
+      });
+  }
+
   function handleGameSubmit(text: string) {
     sendMessage({ type: 'code.submit', text });
   }
@@ -372,13 +396,53 @@ function LobbyPage() {
     <div className="lobby-page">
       <header className="lobby-header">
         <Logo />
-        <div className="lobby-header-user">
-          <span>{user?.username}님 환영합니다</span>
-          <button type="button" className="btn-link" onClick={handleLogout}>
-            로그아웃
-          </button>
-        </div>
+        {room?.status !== 'playing' && (
+          <div className="lobby-header-user">
+            <button type="button" className="btn-link" onClick={() => setShowRules(true)}>
+              게임 규칙
+            </button>
+            <span>{user?.username}님 환영합니다</span>
+            <button type="button" className="btn-link" onClick={handleLogout}>
+              로그아웃
+            </button>
+          </div>
+        )}
       </header>
+
+      {showRules && (
+        <div
+          className="rules-overlay"
+          role="presentation"
+          onClick={() => setShowRules(false)}
+        >
+          <div
+            className="rules-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rules-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="rules-close"
+              onClick={() => setShowRules(false)}
+              aria-label="닫기"
+            >
+              ×
+            </button>
+            <h2 id="rules-title">🐝 게임 규칙</h2>
+            <ul className="rules-list">
+              <li>60초 동안 상대보다 점수가 높으면 승리, 같으면 무승부예요.</li>
+              <li>화면 위에서 코드 스니펫이 계속 떨어져요. 정답 코드만 골라서 입력창에 그대로 입력하고 Enter를 누르세요.</li>
+              <li>정답 코드를 맞히면 +500점, 오답 코드를 잘못 입력하면 -500점이에요.</li>
+              <li>같은 코드를 상대와 동시에 노려도 먼저 제출한 사람만 점수를 가져가요.</li>
+              <li>화면 아래로 완전히 떨어진 코드는 더 이상 제출할 수 없어요.</li>
+              <li>난이도(쉬움/보통/어려움)에 따라 코드가 생성되는 주기와 떨어지는 속도가 달라져요.</li>
+              <li>상대가 게임 중간에 나가면 남아있는 쪽이 자동으로 승리해요.</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       {!room && (
         <div className="lobby-actions">
@@ -423,7 +487,12 @@ function LobbyPage() {
 
       {room && !gameOver && room.status === 'waiting' && (
         <div className="room-status">
-          <h2>방 코드: {room.code}</h2>
+          <h2 className="room-code-heading">
+            방 코드: {room.code}
+            <button type="button" className="btn-link copy-code-btn" onClick={handleCopyRoomCode}>
+              {codeCopied ? '복사됨!' : '복사'}
+            </button>
+          </h2>
           <span className="room-status-label">{STATUS_LABEL[room.status]}</span>
 
           <div className="player-slots">

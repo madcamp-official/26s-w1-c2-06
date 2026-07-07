@@ -1,0 +1,68 @@
+.bee-icon {
+  width: 32px;
+  height: 32px;
+  overflow: visible;
+  filter: drop-shadow(0 0 3px var(--bg)) drop-shadow(0 0 3px var(--bg)) drop-shadow(1px 2px 0 rgba(0, 0, 0, 0.4));
+}
+
+.bee-body {
+  fill: var(--sting);
+}
+
+.bee-stripe {
+  fill: var(--text-h);
+}
+
+.bee-head {
+  fill: #6b3d16;
+}
+
+.bee-eye {
+  fill: #12100d;
+}
+
+.bee-antenna {
+  fill: #12100d;
+}
+
+.bee-stinger {
+  fill: #2a2320;
+}
+
+.bee-wing {
+  fill: var(--accent);
+  opacity: 0.95;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.bee-wing.bee-wing-inner {
+  opacity: 0.75;
+}
+
+.bee-icon.flapping .bee-wing-l {
+  animation: bee-wing-flap-l 140ms steps(1) infinite;
+}
+
+.bee-icon.flapping .bee-wing-r {
+  animation: bee-wing-flap-r 140ms steps(1) infinite;
+}
+
+@keyframes bee-wing-flap-l {
+  50% {
+    transform: scaleX(0.4) translateX(4px);
+  }
+}
+
+@keyframes bee-wing-flap-r {
+  50% {
+    transform: scaleX(0.4) translateX(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bee-icon.flapping .bee-wing-l,
+  .bee-icon.flapping .bee-wing-r {
+    animation: none;
+  }
+}

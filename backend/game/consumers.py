@@ -10,6 +10,7 @@ from django.db import transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
 
+from . import tier
 from .models import GameResult, Profile, Room
 from .redis_client import get_redis
 from .redis_scripts import get_submit_script
@@ -335,7 +336,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         else:
             winner_id = u2
 
-        await self._persist_game_result(room.id, started_at_ms, u1, u2, score1, score2, winner_id)
+        await self._persist_game_result(
+            room.id, started_at_ms, u1, u2, score1, score2, winner_id, room.is_ranked
+        )
 
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -356,7 +359,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         # spawn_lock:*, claim:*, game_end_lock:{room}은 이미 EX가 걸려 있어 자연 만료에 맡긴다
 
     @database_sync_to_async
-    def _persist_game_result(self, room_id, started_at_ms, user1_id, user2_id, score1, score2, winner_id):
+    def _persist_game_result(
+        self, room_id, started_at_ms, user1_id, user2_id, score1, score2, winner_id, is_ranked
+    ):
         with transaction.atomic():
             obj, created = GameResult.objects.get_or_create(
                 room_id=room_id,
@@ -378,6 +383,23 @@ class GameConsumer(AsyncWebsocketConsumer):
                     total_score=Greatest("total_score", score2)
                 )
                 Room.objects.filter(id=room_id).update(status="finished", ended_at=timezone.now())
+
+                # 매칭 큐로 성사된 랭크 게임만 티어에 반영한다 — 방 코드로 만든 친선
+                # 게임은 공모(짜고 치기)로 점수를 조작할 위험이 있어 제외한다. 이 블록이
+                # 위 total_score와 같은 `if created:` 가드 안에 있어서, 크래시 후 같은
+                # 판이 재시도돼도(get_or_create가 created=False를 반환) 티어 반영이
+                # 중복되지 않는다.
+                if is_ranked:
+                    p1 = Profile.objects.select_for_update().get(user_id=user1_id)
+                    p2 = Profile.objects.select_for_update().get(user_id=user2_id)
+                    r1 = tier.rating(p1.tier, p1.tier_score)
+                    r2 = tier.rating(p2.tier, p2.tier_score)
+                    result1 = 0.5 if winner_id is None else (1 if winner_id == user1_id else 0)
+                    delta1 = tier.tier_delta(r1, r2, result1)
+                    tier.apply_tier_result(p1, delta1)
+                    tier.apply_tier_result(p2, -delta1)
+                    p1.save(update_fields=["tier", "tier_score"])
+                    p2.save(update_fields=["tier", "tier_score"])
 
     # --- 제출 판정 (§5, 매칭+선점+채점+제거를 Lua 스크립트 하나로 원자 처리) ---
 

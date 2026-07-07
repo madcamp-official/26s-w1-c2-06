@@ -8,7 +8,17 @@ import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
 import { useAuthStore } from '../store/authStore';
-import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard, ScorePop, WorstEntry } from '../types';
+import type {
+  ActiveItemEffect,
+  FallingCode,
+  GameOverInfo,
+  ItemType,
+  LeaderboardEntry,
+  Room,
+  ScoreBoard,
+  ScorePop,
+  WorstEntry,
+} from '../types';
 import './LobbyPage.css';
 
 const STATUS_LABEL: Record<Room['status'], string> = {
@@ -23,6 +33,11 @@ const WS_ERROR_LABEL: Record<string, string> = {
   room_not_waiting: '지금은 게임을 시작할 수 없는 상태입니다.',
   room_not_finished: '게임이 끝난 뒤에만 재대결할 수 있습니다.',
 };
+
+// 방해 아이템(alert/ink) 지속시간 — 순수 연출값이라 프론트 상수로 관리한다
+// (docs/plan/game-items.md §7). 중첩 시 지속시간을 연장하지 않고 겹쳐서 쌓인다.
+const INK_EFFECT_MS = 3000;
+const ALERT_EFFECT_MS = 3000;
 
 type Difficulty = 'easy' | 'normal' | 'hard';
 
@@ -57,6 +72,8 @@ function LobbyPage() {
   const [myLeaderboardRank, setMyLeaderboardRank] = useState<LeaderboardEntry | null>(null);
   const [worst, setWorst] = useState<WorstEntry[]>([]);
   const [scorePops, setScorePops] = useState<ScorePop[]>([]);
+  const [inkEffects, setInkEffects] = useState<ActiveItemEffect[]>([]);
+  const [alerts, setAlerts] = useState<ActiveItemEffect[]>([]);
 
   const pollTimer = useRef<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -134,6 +151,12 @@ function LobbyPage() {
     });
   }, [scheduleFeedbackClear]);
 
+  // alert 모달의 "확인" 버튼으로 개별 인스턴스를 닫는다 — 자동 타임아웃과 동일하게
+  // 그 id만 배열에서 제거(중첩된 나머지는 그대로 유지).
+  const dismissAlert = useCallback((id: string) => {
+    setAlerts((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
   const handleSocketMessage = useCallback((data: Record<string, unknown>, receivedAt: number) => {
     switch (data.type) {
       case 'clock.sync.reply': {
@@ -167,6 +190,8 @@ function LobbyPage() {
           setGameDuration(null);
           setGameOver(null);
           setFeedback(null);
+          setInkEffects([]);
+          setAlerts([]);
         }
         break;
       }
@@ -177,6 +202,8 @@ function LobbyPage() {
         setFallingCodes([]);
         setScores({});
         setGameOver(null);
+        setInkEffects([]);
+        setAlerts([]);
         break;
       }
       case 'code.spawn': {
@@ -184,7 +211,13 @@ function LobbyPage() {
         const text = data.text as string;
         setFallingCodes((prev) => [
           ...prev,
-          { codeId, text, spawnTs: data.spawn_ts as number, duration: data.duration as number },
+          {
+            codeId,
+            text,
+            spawnTs: data.spawn_ts as number,
+            duration: data.duration as number,
+            item: (data.item as ItemType | null) ?? null,
+          },
         ]);
         break;
       }
@@ -213,6 +246,24 @@ function LobbyPage() {
 
         if (userId === myUserId) {
           pulseFeedback(correct ? 'correct' : 'incorrect');
+        }
+
+        // 아이템은 상대방이 그 코드를 맞혔을 때만 내 화면에 발동한다 — 내가 맞힌
+        // 경우(userId === myUserId)엔 아무 효과도 재생하지 않는다.
+        const item = data.item as ItemType | null | undefined;
+        if (item && correct && userId !== myUserId) {
+          const effectId = `${codeId}-${Date.now()}`;
+          if (item === 'ink') {
+            setInkEffects((prev) => [...prev, { id: effectId, type: 'ink', spawnedAt: Date.now() }]);
+            window.setTimeout(() => {
+              setInkEffects((prev) => prev.filter((e) => e.id !== effectId));
+            }, INK_EFFECT_MS);
+          } else if (item === 'alert') {
+            setAlerts((prev) => [...prev, { id: effectId, type: 'alert', spawnedAt: Date.now() }]);
+            window.setTimeout(() => {
+              setAlerts((prev) => prev.filter((e) => e.id !== effectId));
+            }, ALERT_EFFECT_MS);
+          }
         }
         break;
       }
@@ -556,6 +607,9 @@ function LobbyPage() {
           duration={gameDuration}
           clockOffset={clockOffset}
           feedback={feedback}
+          inkEffects={inkEffects}
+          alerts={alerts}
+          onDismissAlert={dismissAlert}
           onSubmit={handleGameSubmit}
           onForfeit={handleLeaveRoom}
         />

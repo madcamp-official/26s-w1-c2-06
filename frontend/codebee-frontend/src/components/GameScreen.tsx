@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, FormEvent } from 'react';
-import type { FallingCode, ScoreBoard, ScorePop } from '../types';
+import type { ActiveItemEffect, FallingCode, ScoreBoard, ScorePop } from '../types';
 import BeeIcon from './BeeIcon';
 import './GameScreen.css';
+
+const ITEM_BADGE: Record<'alert' | 'ink', string> = { alert: '⚠️', ink: '💧' };
 
 // 판정 결과가 온 뒤 코드가 점수판으로 날아가며 사라지는 연출 시간(ms).
 // LobbyPage가 이 시간만큼 기다렸다가 falling 목록에서 실제로 제거한다.
@@ -69,6 +71,9 @@ interface GameScreenProps {
   duration: number;
   clockOffset: number;
   feedback: 'correct' | 'incorrect' | 'miss' | null;
+  inkEffects: ActiveItemEffect[];
+  alerts: ActiveItemEffect[];
+  onDismissAlert: (id: string) => void;
   onSubmit: (text: string) => void;
   onForfeit: () => void;
 }
@@ -84,6 +89,9 @@ function GameScreen({
   duration,
   clockOffset,
   feedback,
+  inkEffects,
+  alerts,
+  onDismissAlert,
   onSubmit,
   onForfeit,
 }: GameScreenProps) {
@@ -123,6 +131,16 @@ function GameScreen({
   // 인게임 화면에 들어올 때(=이 컴포넌트가 새로 마운트될 때) 3, 2, 1 시작 카운트다운을
   // 화면 중앙에 보여준다. 실제 라운드는 서버 기준으로 이미 시작돼 있어서 순수 연출이다.
   const [startCountdown, setStartCountdown] = useState<number | null>(3);
+
+  // alert 아이템이 걸려있는 동안 입력창을 비활성화하는데, 마지막 하나가 닫히는
+  // 순간(배열이 비게 되는 순간) 다시 타이핑을 이어갈 수 있도록 포커스를 돌려준다.
+  const prevAlertCountRef = useRef(0);
+  useEffect(() => {
+    if (prevAlertCountRef.current > 0 && alerts.length === 0) {
+      inputElRef.current?.focus();
+    }
+    prevAlertCountRef.current = alerts.length;
+  }, [alerts.length]);
 
   useEffect(() => {
     if (startCountdown === null) return;
@@ -347,6 +365,11 @@ function GameScreen({
               style={style}
             >
               {resolution ? code.text : renderCodeText(code.text, input)}
+              {code.item && !resolution && (
+                <span className={`item-badge item-badge-${code.item}`} aria-hidden="true">
+                  {ITEM_BADGE[code.item]}
+                </span>
+              )}
               {resolution && (
                 <>
                   <span className="particle-burst" aria-hidden="true">
@@ -366,7 +389,43 @@ function GameScreen({
             </span>
           );
         })}
+
+        {/* 상대가 맞힌 먹물 아이템 — fall-field 위에만 덮어서 낙하 중인 코드를 가린다.
+            중첩 시 지속시간을 연장하지 않고 겹쳐서 쌓인다(§7 결정) — 각자 자기
+            타임아웃(LobbyPage의 INK_EFFECT_MS)에 맞춰 개별적으로 사라진다. */}
+        {inkEffects.map((effect) => (
+          <div
+            key={effect.id}
+            className="ink-blot"
+            style={{
+              '--blot-x': `${hashToPercent(effect.id)}%`,
+              '--blot-y': `${hashToPercent(`${effect.id}y`)}%`,
+              '--blot-rotate': `${hashToPercent(`${effect.id}r`) - 45}deg`,
+            } as CSSProperties}
+            aria-hidden="true"
+          />
+        ))}
       </div>
+
+      {/* 상대가 맞힌 alert 아이템 — 여러 개 겹쳐 쌓이고, 전부 닫아야(또는 각자
+          타임아웃 지나야) 입력창이 다시 활성화된다(§7 결정). */}
+      {alerts.map((alert, index) => (
+        <div
+          key={alert.id}
+          className="item-alert-overlay"
+          style={{ '--stack-index': index } as CSSProperties}
+        >
+          <div className="item-alert-modal">
+            <span className="item-alert-icon" aria-hidden="true">
+              ⚠️
+            </span>
+            <p>상대가 방해 아이템을 사용했습니다!</p>
+            <button type="button" className="btn-primary" onClick={() => onDismissAlert(alert.id)}>
+              확인
+            </button>
+          </div>
+        </div>
+      ))}
 
       {Object.entries(returningBees).map(([id, bee]) => (
         <span
@@ -391,6 +450,7 @@ function GameScreen({
             value={input}
             onChange={handleInputChange}
             placeholder="화면의 코드를 그대로 입력 후 Enter"
+            disabled={alerts.length > 0}
             autoFocus
           />
           <span ref={measureRef} className="input-measure" aria-hidden="true" />

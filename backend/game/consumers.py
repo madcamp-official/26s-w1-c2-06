@@ -6,6 +6,7 @@ import time
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.conf import settings
 from django.db import transaction
 from django.db.models.functions import Greatest
 from django.utils import timezone
@@ -18,6 +19,10 @@ from .snippet_cache import clear_snippet_pool, get_snippet_pool
 
 GAME_DURATION_MS = 60000
 SCORE_DELTA_INCORRECT = -500
+
+# 방해 아이템(alert/ink) — 정답 스니펫에만 붙고, 확률은 QA 조정용으로 .env에서
+# 읽는다(ITEM_ATTACH_PROB, config/settings.py). docs/plan/game-items.md 참고.
+ITEM_TYPES = ("alert", "ink")
 
 # 게임 시작 전 카운트다운 — 프론트 3초 연출과 서버 스폰/타이머 가동 시점을
 # 맞춰서, 카운트다운 중에 코드가 미리 낙하해버리는 것을 막는다.
@@ -303,8 +308,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         code_id = str(snippet["id"])
         spawn_ts = int(time.time() * 1000)
         duration_ms = compute_fall_duration_ms(snippet["text"], fall_speed_mult)
+
+        item = ""
+        if snippet["is_correct"] and random.random() < settings.ITEM_ATTACH_PROB:
+            item = random.choice(ITEM_TYPES)
+
         value = PACK_SEP.join(
-            [snippet["text"], "1" if snippet["is_correct"] else "0", str(spawn_ts), str(duration_ms)]
+            [snippet["text"], "1" if snippet["is_correct"] else "0", str(spawn_ts), str(duration_ms), item]
         )
         await r.hset(f"codes:{self.room_code}", code_id, value)
         await r.hset(f"text_index:{self.room_code}", snippet["text"], code_id)
@@ -317,6 +327,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "text": snippet["text"],
                 "spawn_ts": spawn_ts,
                 "duration": duration_ms,
+                "item": item or None,
             },
         )
 
@@ -439,7 +450,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         script = get_submit_script()
         now_ms = int(time.time() * 1000)
         correct_delta = compute_correct_score(text)
-        result, detail = await script(
+        result, detail, item = await script(
             keys=[
                 f"text_index:{self.room_code}",
                 f"codes:{self.room_code}",
@@ -471,6 +482,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "correct": result == 1,
                 "user_id": self.user.id,
                 "delta": correct_delta if result == 1 else SCORE_DELTA_INCORRECT,
+                "item": item or None,
             },
         )
 
@@ -502,6 +514,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "text": event["text"],
             "spawn_ts": event["spawn_ts"],
             "duration": event["duration"],
+            "item": event.get("item"),
         })
 
     async def code_result(self, event):
@@ -511,6 +524,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "correct": event["correct"],
             "user_id": event["user_id"],
             "delta": event["delta"],
+            "item": event.get("item"),
         })
 
     async def game_over(self, event):

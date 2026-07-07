@@ -209,6 +209,17 @@
   font-weight: 700;
 }
 
+/* 방해 아이템 배지 — 낙하 코드 박스 우상단에 살짝 걸쳐서 표시 (양쪽 플레이어 모두에게
+   보임, docs/plan/game-items.md §1) */
+.item-badge {
+  position: absolute;
+  top: -12px;
+  right: -10px;
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+}
+
 /* 판정 완료 후 점수판 쪽으로 날아가며 사라지는 연출 */
 .falling-code.resolved {
   pointer-events: none;
@@ -429,4 +440,97 @@
   60% {
     transform: translateX(8px);
   }
+}
+
+.submit-form input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 먹물 아이템 — fall-field 안에서만 덮어서 낙하 중인 코드 식별을 방해한다.
+   중첩되면 각자 다른 위치/각도(--blot-x/--blot-y/--blot-rotate, id 해시 기반)로
+   겹쳐 쌓인다(§7 결정). */
+.ink-blot {
+  position: absolute;
+  top: var(--blot-y, 30%);
+  left: var(--blot-x, 30%);
+  width: 55%;
+  height: 55%;
+  transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg));
+  border-radius: 42% 58% 61% 39% / 46% 41% 59% 54%;
+  background: radial-gradient(
+    circle at 40% 40%,
+    rgba(10, 10, 15, 0.96),
+    rgba(10, 10, 15, 0.85) 60%,
+    rgba(10, 10, 15, 0.55) 80%,
+    transparent 100%
+  );
+  filter: blur(2px);
+  z-index: 40;
+  pointer-events: none;
+  animation: ink-splat 220ms ease-out;
+}
+
+@keyframes ink-splat {
+  from {
+    transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-blot {
+    animation: none;
+  }
+}
+
+/* alert 아이템 — 커스텀 모달(네이티브 window.alert() 안 씀, §7 결정). 여러 개
+   겹치면 --stack-index로 살짝 어긋난 위치에 쌓이고, 배경이 겹쳐 더 어두워진다. */
+.item-alert-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 100;
+  animation: alert-fade-in 150ms ease-out;
+}
+
+@keyframes alert-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.item-alert-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 32px;
+  background: var(--bg);
+  border: 3px solid var(--sting);
+  color: var(--text-h);
+  text-align: center;
+  box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.15);
+  transform: translate(calc(var(--stack-index, 0) * 10px), calc(var(--stack-index, 0) * -10px));
+}
+
+.item-alert-icon {
+  font-size: 40px;
+}
+
+.item-alert-modal p {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text-h);
 }

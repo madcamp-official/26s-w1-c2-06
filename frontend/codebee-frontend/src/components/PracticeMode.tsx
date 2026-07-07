@@ -10,11 +10,13 @@ import {
   computeCorrectScore,
   computeFallDurationMs,
 } from '../lib/gameConstants';
-import type { FallingCode, PracticeSnippet, ScoreBoard, ScorePop } from '../types';
+import type { ActiveItemEffect, FallingCode, PracticeSnippet, ScoreBoard, ScorePop } from '../types';
 import GameScreen, { RESOLVE_ANIM_MS } from './GameScreen';
 
 const MY_USER_ID = 1;
 const BOT_USER_ID = 2;
+// 연습모드엔 상대가 없어 방해 아이템이 발동되지 않는다 — GameScreen에 항상 빈 배열로 전달.
+const EMPTY_ITEM_EFFECTS: ActiveItemEffect[] = [];
 
 type Phase = 'setup' | 'countdown' | 'playing' | 'over';
 
@@ -276,6 +278,10 @@ function PracticeMode({ myUsername, onExit }: PracticeModeProps) {
       duration={GAME_DURATION_MS}
       clockOffset={0}
       feedback={feedback}
+      // 연습모드는 상대가 없어 방해 아이템이 발동될 일이 없다 — 항상 빈 상태로 고정.
+      inkEffects={EMPTY_ITEM_EFFECTS}
+      alerts={EMPTY_ITEM_EFFECTS}
+      onDismissAlert={() => {}}
       onSubmit={handleSubmit}
       onForfeit={() => setPhase('over')}
     />

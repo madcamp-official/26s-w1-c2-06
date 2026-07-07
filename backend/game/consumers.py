@@ -390,8 +390,19 @@ class GameConsumer(AsyncWebsocketConsumer):
                 # 판이 재시도돼도(get_or_create가 created=False를 반환) 티어 반영이
                 # 중복되지 않는다.
                 if is_ranked:
-                    p1 = Profile.objects.select_for_update().get(user_id=user1_id)
-                    p2 = Profile.objects.select_for_update().get(user_id=user2_id)
+                    # user1/user2는 room.player1/player2 순서라 매칭 큐가 어느 쪽을
+                    # player1로 잡았는지에 따라 같은 두 유저라도 방마다 순서가 뒤바뀔 수
+                    # 있다 — 잠금 순서를 room 역할이 아니라 user_id로 고정해야, 이
+                    # 두 유저가 동시에 다른 두 방에서 각각 게임을 끝내는 경우 잠금 순서가
+                    # 서로 반대로 걸려 데드락이 나는 걸 막을 수 있다.
+                    lo_id, hi_id = sorted((user1_id, user2_id))
+                    profiles = {
+                        p.user_id: p
+                        for p in Profile.objects.select_for_update()
+                        .filter(user_id__in=(lo_id, hi_id))
+                        .order_by("user_id")
+                    }
+                    p1, p2 = profiles[user1_id], profiles[user2_id]
                     r1 = tier.rating(p1.tier, p1.tier_score)
                     r2 = tier.rating(p2.tier, p2.tier_score)
                     result1 = 0.5 if winner_id is None else (1 if winner_id == user1_id else 0)

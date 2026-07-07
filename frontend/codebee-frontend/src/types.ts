@@ -35,6 +35,11 @@ export interface LeaderboardEntry {
   total_score: number;
 }
 
+export interface WorstEntry {
+  username: string;
+  total_score: number;
+}
+
 export interface ScorePop {
   id: string;
   userId: number;

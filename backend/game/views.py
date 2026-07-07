@@ -142,7 +142,14 @@ def leaderboard(request):
                 me = {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
             break
 
-    return JsonResponse({"entries": entries, "me": me})
+    # 하위권 놀리기용 — 정식 랭킹(0점 이하 제외)과 별개로, 전체 유저 중 점수가
+    # 가장 낮은 3명을 그대로 보여준다(0점 이하도 포함 — 오히려 그게 놀림감이다).
+    worst = [
+        {"username": p.user.username, "total_score": p.total_score}
+        for p in Profile.objects.select_related("user").order_by("total_score", "id")[:3]
+    ]
+
+    return JsonResponse({"entries": entries, "me": me, "worst": worst})
 
 
 @require_GET

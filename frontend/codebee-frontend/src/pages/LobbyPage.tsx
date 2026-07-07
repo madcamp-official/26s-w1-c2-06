@@ -8,7 +8,7 @@ import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
 import { useAuthStore } from '../store/authStore';
-import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard, ScorePop } from '../types';
+import type { FallingCode, GameOverInfo, LeaderboardEntry, Room, ScoreBoard, ScorePop, WorstEntry } from '../types';
 import './LobbyPage.css';
 
 const STATUS_LABEL: Record<Room['status'], string> = {
@@ -24,6 +24,14 @@ const WS_ERROR_LABEL: Record<string, string> = {
   room_not_finished: '게임이 끝난 뒤에만 재대결할 수 있습니다.',
 };
 
+type Difficulty = 'easy' | 'normal' | 'hard';
+
+const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  easy: '쉬움',
+  normal: '보통',
+  hard: '어려움',
+};
+
 function LobbyPage() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -33,6 +41,7 @@ function LobbyPage() {
   const [joinCode, setJoinCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
 
   // --- 인게임 상태 (WebSocket 이벤트로만 갱신됨, backend-implementation.md §4~§6) ---
   const [fallingCodes, setFallingCodes] = useState<FallingCode[]>([]);
@@ -44,6 +53,7 @@ function LobbyPage() {
   const [clockOffset, setClockOffset] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [myLeaderboardRank, setMyLeaderboardRank] = useState<LeaderboardEntry | null>(null);
+  const [worst, setWorst] = useState<WorstEntry[]>([]);
   const [scorePops, setScorePops] = useState<ScorePop[]>([]);
 
   const pollTimer = useRef<number | null>(null);
@@ -86,9 +96,10 @@ function LobbyPage() {
   // (게임이 끝나면 game.over 핸들러가 다시 최신값으로 갱신한다)
   useEffect(() => {
     getLeaderboard()
-      .then(({ entries, me }) => {
+      .then(({ entries, me, worst }) => {
         setLeaderboard(entries);
         setMyLeaderboardRank(me);
+        setWorst(worst);
       })
       .catch(() => {
         // 조회 실패는 조용히 무시 — 리더보드는 부가 정보라 화면 전체를 막을 이유가 없다
@@ -203,9 +214,10 @@ function LobbyPage() {
         setGameOver({ scores: data.scores as ScoreBoard, winnerId: data.winner_id as number | null });
         setRoom((prev) => (prev ? { ...prev, status: 'finished' } : prev));
         getLeaderboard()
-          .then(({ entries, me }) => {
+          .then(({ entries, me, worst }) => {
             setLeaderboard(entries);
             setMyLeaderboardRank(me);
+            setWorst(worst);
           })
           .catch(() => {
             // 리더보드 조회 실패는 결산 화면 표시를 막지 않고 조용히 무시한다
@@ -285,7 +297,7 @@ function LobbyPage() {
   }
 
   function handleStartGame() {
-    sendMessage({ type: 'game.start' });
+    sendMessage({ type: 'game.start', difficulty });
   }
 
   function handleGameSubmit(text: string) {
@@ -313,9 +325,10 @@ function LobbyPage() {
 
     // 로비로 돌아왔을 때 리더보드를 최신 상태로 갱신 (지우지는 않는다 — 로비에서도 계속 보여줌)
     getLeaderboard()
-      .then(({ entries, me }) => {
+      .then(({ entries, me, worst }) => {
         setLeaderboard(entries);
         setMyLeaderboardRank(me);
+        setWorst(worst);
       })
       .catch(() => {});
   }
@@ -398,7 +411,12 @@ function LobbyPage() {
       )}
 
       {!room && (
-        <Leaderboard entries={leaderboard} me={myLeaderboardRank} myUsername={user?.username ?? null} />
+        <Leaderboard
+          entries={leaderboard}
+          me={myLeaderboardRank}
+          myUsername={user?.username ?? null}
+          worst={worst}
+        />
       )}
 
       {error && <p className="field-error">{error}</p>}
@@ -429,9 +447,26 @@ function LobbyPage() {
           {room.player2 && !youAreHost && <p className="room-hint">방장이 게임을 시작하면 자동으로 전환됩니다.</p>}
 
           {youAreHost && room.player2 && (
-            <button type="button" className="btn-primary" onClick={handleStartGame}>
-              게임 시작
-            </button>
+            <>
+              <div className="difficulty-picker">
+                <span className="difficulty-label">난이도</span>
+                <div className="difficulty-options">
+                  {(Object.keys(DIFFICULTY_LABEL) as Difficulty[]).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`difficulty-btn ${difficulty === d ? 'selected' : ''}`}
+                      onClick={() => setDifficulty(d)}
+                    >
+                      {DIFFICULTY_LABEL[d]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button type="button" className="btn-primary" onClick={handleStartGame}>
+                게임 시작
+              </button>
+            </>
           )}
 
           <button type="button" className="btn-link" onClick={handleLeaveRoom}>
@@ -460,6 +495,11 @@ function LobbyPage() {
       {room && gameOver && (
         <div className={`room-status result-${resultOutcome}`}>
           <div className={`result-banner ${resultOutcome}`}>
+            {resultOutcome === 'lose' && (
+              <span className="result-emoji" aria-hidden="true">
+                😡
+              </span>
+            )}
             {resultOutcome === 'win'
               ? 'YOU WIN!'
               : resultOutcome === 'lose'
@@ -490,7 +530,12 @@ function LobbyPage() {
             </div>
           </div>
 
-          <Leaderboard entries={leaderboard} me={myLeaderboardRank} myUsername={user?.username ?? null} />
+          <Leaderboard
+            entries={leaderboard}
+            me={myLeaderboardRank}
+            myUsername={user?.username ?? null}
+            worst={worst}
+          />
 
           {youAreHost ? (
             <button type="button" className="btn-primary" onClick={handleRematch}>

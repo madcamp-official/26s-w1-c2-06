@@ -19,6 +19,10 @@ GAME_DURATION_MS = 60000
 SPAWN_TICK_MS = 500
 SCORE_DELTA_INCORRECT = -500
 
+# 게임 시작 전 카운트다운 — 프론트 3초 연출과 서버 스폰/타이머 가동 시점을
+# 맞춰서, 카운트다운 중에 코드가 미리 낙하해버리는 것을 막는다.
+PREGAME_COUNTDOWN_MS = 3000
+
 # 정답 점수는 맞힌 스니펫 길이에 비례한다(길수록 더 어려우니 더 큰 점수) — 낙하 시간
 # 공식(compute_fall_duration_ms)과 같은 선형 + 상한 패턴을 쓴다.
 SCORE_CORRECT_BASE = 200
@@ -66,6 +70,15 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def disconnect(self, close_code):
         if not hasattr(self, "room_group_name"):
             return
+
+        pregame_task = getattr(self, "_pregame_task", None)
+        if pregame_task is not None:
+            pregame_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pregame_task
+            # 취소되면 카운트다운 완료 시점의 정리(락 삭제)가 실행되지 못하므로
+            # 여기서 대신 지운다 — 안 그러면 재대결/재시작이 최대 10초(EX) 막힌다.
+            await get_redis().delete(f"game_starting_lock:{self.room_code}")
 
         spawn_task = getattr(self, "_spawn_task", None)
         if spawn_task is not None:
@@ -162,17 +175,48 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         r = get_redis()
+        acquired = await r.set(f"game_starting_lock:{self.room_code}", 1, nx=True, ex=10)
+        if not acquired:
+            return  # 이미 다른 프로세스가 카운트다운을 시작함
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "game.starting",
+                "countdown": PREGAME_COUNTDOWN_MS,
+                "difficulty": room.difficulty,
+            },
+        )
+        self._pregame_task = asyncio.create_task(self._begin_game_after_countdown())
+
+    async def _begin_game_after_countdown(self):
+        await asyncio.sleep(PREGAME_COUNTDOWN_MS / 1000)
+
+        r = get_redis()
+        room = await self._get_room()
+        if room is None or room.status != "waiting" or room.player2_id is None:
+            # 카운트다운 중 한쪽이 이탈해 방이 재배정/종료된 경우 — 시작하지 않는다
+            await r.delete(f"game_starting_lock:{self.room_code}")
+            return
+
         now_ms = int(time.time() * 1000)
         acquired = await r.set(f"game_started_at:{self.room_code}", now_ms, nx=True)
         if not acquired:
+            await r.delete(f"game_starting_lock:{self.room_code}")
             return  # 이미 다른 프로세스가 시작 처리를 마침
 
         await self._set_room_playing()
 
         await self.channel_layer.group_send(
             self.room_group_name,
-            {"type": "game.start", "started_at": now_ms, "duration": GAME_DURATION_MS},
+            {
+                "type": "game.start",
+                "started_at": now_ms,
+                "duration": GAME_DURATION_MS,
+                "difficulty": room.difficulty,
+            },
         )
+        await r.delete(f"game_starting_lock:{self.room_code}")
 
     @database_sync_to_async
     def _set_room_playing(self):
@@ -382,11 +426,19 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # --- group_send 브로드캐스트 수신 핸들러 ---
 
+    async def game_starting(self, event):
+        await self._send_json({
+            "type": "game.starting",
+            "countdown": event["countdown"],
+            "difficulty": event.get("difficulty"),
+        })
+
     async def game_start(self, event):
         await self._send_json({
             "type": "game.start",
             "started_at": event["started_at"],
             "duration": event["duration"],
+            "difficulty": event.get("difficulty"),
         })
         self._spawn_task = asyncio.create_task(
             self._spawn_tick_loop(event["started_at"], event["duration"])

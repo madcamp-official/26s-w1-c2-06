@@ -4,7 +4,8 @@ from .redis_client import get_redis
 # (backend-implementation.md §5).
 #
 # KEYS[1]=text_index:{room}, KEYS[2]=codes:{room}, KEYS[3]=score:{room}, KEYS[4]=game_started_at:{room}
-# ARGV[1]=제출 텍스트(정규화됨), ARGV[2]=user_id, ARGV[3]=+500, ARGV[4]=-500,
+# ARGV[1]=제출 텍스트(정규화됨), ARGV[2]=user_id,
+# ARGV[3]=정답 점수(스니펫 길이 비례, compute_correct_score로 호출 측에서 계산해 넘김), ARGV[4]=-500,
 # ARGV[5]=now_ms, ARGV[6]=duration_ms(60000), ARGV[7]=room
 #
 # codes:{room}의 값은 "text\\x01is_correct\\x01spawn_ts\\x01duration_ms" 형태로 패킹된다

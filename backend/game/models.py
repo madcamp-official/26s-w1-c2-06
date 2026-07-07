@@ -1,12 +1,18 @@
 from django.conf import settings
 from django.db import models
 
+from . import tier
+
 User = settings.AUTH_USER_MODEL
 
 
 class Profile(models.Model):
+    TIER_CHOICES = [(t, t) for t in tier.TIERS]
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     total_score = models.IntegerField(default=0)  # 역대 한 판 최고 기록 (누적 아님)
+    tier = models.CharField(max_length=10, choices=TIER_CHOICES, default="iron")
+    tier_score = models.IntegerField(default=0)  # 0~99, 100 달성 시 승급(초과분 이월)
 
 
 class Room(models.Model):
@@ -15,9 +21,11 @@ class Room(models.Model):
         ("playing", "playing"),
         ("finished", "finished"),
     ]
-
     code = models.CharField(max_length=16, unique=True)  # 초대/입장 코드
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="waiting")
+    # 매칭 큐를 통해 성사된 랭크 게임인지 — 방 코드 생성/참가로 만든 친선 게임은 공모로
+    # 점수를 조작할 위험이 있어 항상 False, 티어 점수 반영 대상에서 제외된다.
+    is_ranked = models.BooleanField(default=False)
     player1 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     player2 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)

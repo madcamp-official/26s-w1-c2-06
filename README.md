@@ -5,8 +5,10 @@
 **목적:** 공통 과제를 함께 수행하며 웹 개발의 전체 흐름을 빠르게 익히고 협업에 적응하기
 
 **결과물:** 기획부터 배포까지 완료된 웹 서비스와 관련 문서 일체
+https://codebee.madcamp-kaist.org
 
 **노션링크:** https://furtive-selenium-dc5.notion.site/3913ca9f2d6d8042a363db66ebae946b?source=copy_link
+
 
 ---
 

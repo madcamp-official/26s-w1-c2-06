@@ -1,12 +1,12 @@
 .logo {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 
 .logo-mark {
-  width: 26px;
-  height: 26px;
+  width: 42px;
+  height: 42px;
   flex: none;
   shape-rendering: crispEdges;
 }
@@ -31,7 +31,7 @@
 .logo-word {
   font-family: var(--pixel-display);
   font-weight: 400;
-  font-size: 13px;
+  font-size: 20px;
   letter-spacing: 0;
   color: var(--text-h);
 }

@@ -12,6 +12,12 @@
   --sting: #ffb020;
   --neon-green: #39ff14;
   --neon-red: #ff2a6d;
+  --neon-cyan: #00f0ff;
+  --neon-magenta: #ff2af5;
+  --neon-yellow: #faff00;
+  --neon-gold: #ffd700;
+  --neon-silver: #d9dbe5;
+  --neon-bronze: #ff9a4d;
   --social-bg: rgba(47, 48, 58, 0.5);
   --shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
   /* 모눈종이 그리드 — 배경 이미지 레이어 목록이라, 각 패널에서
@@ -61,6 +67,21 @@
 
 body {
   margin: 0;
+  /* 기본 커서를 숨기고 CursorBee 컴포넌트가 대신 마우스를 따라다니며 날갯짓한다 */
+  cursor: none;
+  /* 드래그로 텍스트가 선택되는 걸 막는다(게임 화면 오조작 방지) — 방 코드처럼
+     복사가 필요한 텍스트는 선택 대신 전용 복사 버튼을 둔다 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 텍스트를 입력하는 곳은 CursorBee가 대신 숨고(CursorBee.tsx) 원래 텍스트 커서를 보여주고,
+   입력한 내용을 선택/복사할 수 있어야 하니 선택 금지에서 제외한다 */
+input,
+textarea {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 h1,

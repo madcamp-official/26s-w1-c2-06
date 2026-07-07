@@ -9,6 +9,13 @@
   background: #000;
 }
 
+/* 다른 btn-link들과 달리 화면을 다 차지하지 않도록 작게, 가운데로 */
+.forfeit-btn {
+  align-self: center;
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
 /* 남은 시간 10초 이하일 때 화면 중앙에 크게 뜨는 카운트다운. key={remainingSec}로
    숫자가 바뀔 때마다 이 요소를 새로 마운트해서, 매번 처음부터 애니메이션이 재생된다. */
 .countdown-overlay {
@@ -307,48 +314,6 @@
   100% {
     transform: translate(var(--fly-x, 0px), var(--fly-y, 0px));
     opacity: 0;
-  }
-}
-
-.bee-icon {
-  width: 32px;
-  height: 32px;
-  overflow: visible;
-  filter: drop-shadow(0 0 3px var(--bg)) drop-shadow(0 0 3px var(--bg)) drop-shadow(1px 2px 0 rgba(0, 0, 0, 0.4));
-}
-
-.bee-body {
-  fill: var(--sting);
-}
-
-.bee-stripe {
-  fill: var(--text-h);
-}
-
-.bee-wing {
-  fill: var(--accent);
-  opacity: 0.95;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.bee-icon.flapping .bee-wing-l {
-  animation: bee-wing-flap-l 140ms steps(1) infinite;
-}
-
-.bee-icon.flapping .bee-wing-r {
-  animation: bee-wing-flap-r 140ms steps(1) infinite;
-}
-
-@keyframes bee-wing-flap-l {
-  50% {
-    transform: scaleX(0.4) translateX(4px);
-  }
-}
-
-@keyframes bee-wing-flap-r {
-  50% {
-    transform: scaleX(0.4) translateX(-4px);
   }
 }
 

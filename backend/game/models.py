@@ -21,15 +21,8 @@ class Room(models.Model):
         ("playing", "playing"),
         ("finished", "finished"),
     ]
-    DIFFICULTY_CHOICES = [
-        ("easy", "easy"),
-        ("medium", "medium"),
-        ("hard", "hard"),
-    ]
-
     code = models.CharField(max_length=16, unique=True)  # 초대/입장 코드
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="waiting")
-    difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, default="medium")
     # 매칭 큐를 통해 성사된 랭크 게임인지 — 방 코드 생성/참가로 만든 친선 게임은 공모로
     # 점수를 조작할 위험이 있어 항상 False, 티어 점수 반영 대상에서 제외된다.
     is_ranked = models.BooleanField(default=False)

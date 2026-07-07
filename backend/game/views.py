@@ -68,7 +68,6 @@ def _room_payload(room):
     return {
         "code": room.code,
         "status": room.status,
-        "difficulty": room.difficulty,
         "player1": room.player1.username if room.player1 else None,
         "player2": room.player2.username if room.player2 else None,
     }
@@ -79,12 +78,7 @@ def create_room(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
 
-    data = json.loads(request.body or b"{}")
-    difficulty = data.get("difficulty", "medium")
-    if difficulty not in dict(Room.DIFFICULTY_CHOICES):
-        return JsonResponse({"error": "invalid_difficulty"}, status=400)
-
-    room = Room.objects.create(code=generate_room_code(), player1=request.user, difficulty=difficulty)
+    room = Room.objects.create(code=generate_room_code(), player1=request.user)
     return JsonResponse({**_room_payload(room), "is_host": True}, status=201)
 
 
@@ -137,7 +131,14 @@ def leaderboard(request):
                 me = {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
             break
 
-    return JsonResponse({"entries": entries, "me": me})
+    # 하위권 놀리기용 — 정식 랭킹(0점 이하 제외)과 별개로, 전체 유저 중 점수가
+    # 가장 낮은 3명을 그대로 보여준다(0점 이하도 포함 — 오히려 그게 놀림감이다).
+    worst = [
+        {"username": p.user.username, "total_score": p.total_score}
+        for p in Profile.objects.select_related("user").order_by("total_score", "id")[:3]
+    ]
+
+    return JsonResponse({"entries": entries, "me": me, "worst": worst})
 
 
 @require_GET

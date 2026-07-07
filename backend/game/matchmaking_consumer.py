@@ -125,7 +125,6 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
         return Room.objects.create(
             code=generate_room_code(),
             is_ranked=True,
-            difficulty="medium",
             player1_id=self.user.id,
             player2_id=partner_id,
         )

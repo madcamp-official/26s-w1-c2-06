@@ -17,7 +17,6 @@ from .redis_scripts import get_submit_script
 from .snippet_cache import clear_snippet_pool, get_snippet_pool
 
 GAME_DURATION_MS = 60000
-SPAWN_TICK_MS = 500
 SCORE_DELTA_INCORRECT = -500
 
 # 게임 시작 전 카운트다운 — 프론트 3초 연출과 서버 스폰/타이머 가동 시점을
@@ -45,9 +44,19 @@ FALL_BASE_MS = 5000
 FALL_PER_CHAR_MS = 150
 FALL_MAX_MS = 14000
 
+# 난이도 프리셋 — spawn_tick_ms(코드 생성 주기, 짧을수록 자주 스폰)와
+# fall_speed_mult(낙하 시간 배율, 작을수록 빨리 떨어짐)를 함께 조절한다.
+DIFFICULTY_PRESETS = {
+    "easy": {"spawn_tick_ms": 800, "fall_speed_mult": 1.4},
+    "normal": {"spawn_tick_ms": 500, "fall_speed_mult": 1.0},
+    "hard": {"spawn_tick_ms": 320, "fall_speed_mult": 0.7},
+}
+DEFAULT_DIFFICULTY = "normal"
 
-def compute_fall_duration_ms(text):
-    return min(FALL_MAX_MS, FALL_BASE_MS + len(text) * FALL_PER_CHAR_MS)
+
+def compute_fall_duration_ms(text, fall_speed_mult=1.0):
+    base = min(FALL_MAX_MS, FALL_BASE_MS + len(text) * FALL_PER_CHAR_MS)
+    return int(base * fall_speed_mult)
 
 
 class GameConsumer(AsyncWebsocketConsumer):
@@ -103,7 +112,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         msg_type = data.get("type")
 
         if msg_type == "game.start":
-            await self._handle_game_start()
+            await self._handle_game_start(data)
         elif msg_type == "clock.sync":
             await self._handle_clock_sync(data)
         elif msg_type == "code.submit":
@@ -160,7 +169,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # --- 게임 시작 (§6 "게임 시작" 파트, 호스트 트리거) ---
 
-    async def _handle_game_start(self):
+    async def _handle_game_start(self, data):
         room = await self._get_room()
         if room is None:
             return
@@ -175,6 +184,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._send_json({"type": "error", "error": "room_not_waiting"})
             return
 
+        difficulty = data.get("difficulty")
+        if difficulty not in DIFFICULTY_PRESETS:
+            difficulty = DEFAULT_DIFFICULTY
+
         r = get_redis()
         acquired = await r.set(f"game_starting_lock:{self.room_code}", 1, nx=True, ex=10)
         if not acquired:
@@ -185,12 +198,12 @@ class GameConsumer(AsyncWebsocketConsumer):
             {
                 "type": "game.starting",
                 "countdown": PREGAME_COUNTDOWN_MS,
-                "difficulty": room.difficulty,
+                "difficulty": difficulty,
             },
         )
-        self._pregame_task = asyncio.create_task(self._begin_game_after_countdown())
+        self._pregame_task = asyncio.create_task(self._begin_game_after_countdown(difficulty))
 
-    async def _begin_game_after_countdown(self):
+    async def _begin_game_after_countdown(self, difficulty):
         await asyncio.sleep(PREGAME_COUNTDOWN_MS / 1000)
 
         r = get_redis()
@@ -214,7 +227,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "type": "game.start",
                 "started_at": now_ms,
                 "duration": GAME_DURATION_MS,
-                "difficulty": room.difficulty,
+                "difficulty": difficulty,
             },
         )
         await r.delete(f"game_starting_lock:{self.room_code}")
@@ -246,7 +259,11 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # --- 스폰 틱 로직 (§4, "스폰도 선점 문제") ---
 
-    async def _spawn_tick_loop(self, started_at, duration_ms):
+    async def _spawn_tick_loop(self, started_at, duration_ms, difficulty=DEFAULT_DIFFICULTY):
+        preset = DIFFICULTY_PRESETS.get(difficulty, DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY])
+        spawn_tick_ms = preset["spawn_tick_ms"]
+        fall_speed_mult = preset["fall_speed_mult"]
+
         last_tick = -1
         while True:
             await asyncio.sleep(0.1)  # tick 경계를 놓치지 않도록 짧게 자주 깨어남
@@ -256,12 +273,12 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self._try_end_game()
                 break
 
-            tick = elapsed // SPAWN_TICK_MS
+            tick = elapsed // spawn_tick_ms
             if tick != last_tick:
                 last_tick = tick
-                await self._try_spawn(tick)
+                await self._try_spawn(tick, fall_speed_mult)
 
-    async def _try_spawn(self, tick):
+    async def _try_spawn(self, tick, fall_speed_mult=1.0):
         r = get_redis()
         acquired = await r.set(
             f"spawn_lock:{self.room_code}:{tick}", self.channel_name, nx=True, ex=5
@@ -285,7 +302,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         code_id = str(snippet["id"])
         spawn_ts = int(time.time() * 1000)
-        duration_ms = compute_fall_duration_ms(snippet["text"])
+        duration_ms = compute_fall_duration_ms(snippet["text"], fall_speed_mult)
         value = PACK_SEP.join(
             [snippet["text"], "1" if snippet["is_correct"] else "0", str(spawn_ts), str(duration_ms)]
         )
@@ -467,14 +484,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         })
 
     async def game_start(self, event):
+        difficulty = event.get("difficulty", DEFAULT_DIFFICULTY)
         await self._send_json({
             "type": "game.start",
             "started_at": event["started_at"],
             "duration": event["duration"],
-            "difficulty": event.get("difficulty"),
+            "difficulty": difficulty,
         })
         self._spawn_task = asyncio.create_task(
-            self._spawn_tick_loop(event["started_at"], event["duration"])
+            self._spawn_tick_loop(event["started_at"], event["duration"], difficulty)
         )
 
     async def code_spawn(self, event):

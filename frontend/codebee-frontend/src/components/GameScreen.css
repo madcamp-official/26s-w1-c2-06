@@ -5,6 +5,91 @@
   gap: 16px;
   padding: 24px 20px;
   box-sizing: border-box;
+  /* 라이트/다크 모드 등 컴퓨터 설정과 무관하게 게임 화면은 항상 검은 배경 */
+  background: #000;
+}
+
+/* 다른 btn-link들과 달리 화면을 다 차지하지 않도록 작게, 가운데로 */
+.forfeit-btn {
+  align-self: center;
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
+/* 남은 시간 10초 이하일 때 화면 중앙에 크게 뜨는 카운트다운. key={remainingSec}로
+   숫자가 바뀔 때마다 이 요소를 새로 마운트해서, 매번 처음부터 애니메이션이 재생된다. */
+.countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 90;
+  font-family: var(--pixel-display);
+  font-size: 140px;
+  color: var(--sting);
+  text-shadow:
+    0 0 24px rgba(255, 176, 32, 0.85),
+    0 0 48px rgba(255, 176, 32, 0.5);
+  opacity: 0;
+  animation: countdown-pulse 900ms ease-out forwards;
+}
+
+@keyframes countdown-pulse {
+  /* 등장: 확대된 상태에서 축소되며 페이드인 */
+  0% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  /* 유지 */
+  70% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  /* 퇴장: 크기 변화 없이 페이드아웃 */
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* 인게임 화면에 들어오자마자 3초간 뜨는 시작 카운트다운. 남은 시간이 얼마 안
+   남았을 때 뜨는 .countdown-overlay와 같은 연출(countdown-pulse)을 재사용하되,
+   "준비"를 뜻하는 보라색으로 구분한다. */
+.start-countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 95;
+  font-family: var(--pixel-display);
+  font-size: 160px;
+  color: var(--accent);
+  text-shadow:
+    0 0 24px rgba(192, 132, 252, 0.85),
+    0 0 48px rgba(192, 132, 252, 0.5);
+  opacity: 0;
+  animation: countdown-pulse 900ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .countdown-overlay,
+  .start-countdown-overlay {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .submit-form.feedback-miss {
+    animation: none;
+  }
 }
 
 .game-hud {
@@ -98,16 +183,16 @@
 }
 
 .score-value {
-  font-size: 28px;
-  font-weight: 600;
-  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 400;
+  font-family: var(--pixel-display);
   color: var(--text-h);
 }
 
 .game-timer {
-  font-size: 32px;
-  font-weight: 600;
-  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 400;
+  font-family: var(--pixel-display);
   color: var(--accent);
 }
 
@@ -115,9 +200,14 @@
   position: relative;
   flex: 1;
   min-height: 360px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--code-bg);
+  border: 3px solid var(--text-h);
+  border-radius: 0;
+  /* 컴퓨터 설정과 무관하게 항상 검은 배경 위에 모눈만 은은하게 */
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 22px),
+    #000;
+  background-size: 22px 22px;
   overflow: hidden;
 }
 
@@ -125,13 +215,23 @@
   position: absolute;
   transform: translateX(-50%);
   font-family: var(--mono);
-  font-size: 15px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-size: 22px;
+  padding: 5px 10px;
+  border-radius: 0;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   color: var(--text-h);
   white-space: nowrap;
+  /* 마우스 드래그로 코드를 선택해서 복사/붙여넣기 하는 걸 막는다 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 지금까지 입력한 것과 일치하는 접두사 부분만 하이라이트 */
+.code-typed {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 700;
 }
 
 /* 판정 완료 후 점수판 쪽으로 날아가며 사라지는 연출 */
@@ -172,9 +272,9 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
   background: currentColor;
   animation: particle-burst var(--resolve-ms, 650ms) ease-out forwards;
 }
@@ -186,26 +286,137 @@
   }
 }
 
+/* 코드를 물고 나르는 벌 — 날아가는 코드 위에 겹쳐서 함께 이동한다 */
+.carry-bee {
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  pointer-events: none;
+}
+
+.return-bee {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  animation: bee-return var(--bee-return-ms, 500ms) ease-in-out forwards;
+}
+
+@keyframes bee-return {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--fly-x, 0px), var(--fly-y, 0px));
+    opacity: 0;
+  }
+}
+
 .submit-form {
   display: flex;
   gap: 8px;
 }
 
-.submit-form input {
+.input-wrap {
+  position: relative;
   flex: 1;
+  overflow: hidden;
+}
+
+.submit-form input {
+  width: 100%;
   font: inherit;
   font-family: var(--mono);
+  font-size: 22px;
   padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
+  border-radius: 0;
+  border: 3px solid var(--text-h);
   background: var(--bg);
   color: var(--text-h);
   box-sizing: border-box;
 }
 
+/* 타이핑할 때마다 입력창이 가볍게 떨리는 이펙트 */
+.submit-form input.vibrating {
+  animation: input-vibrate 150ms ease-in-out;
+}
+
+@keyframes input-vibrate {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-1.5px);
+  }
+  50% {
+    transform: translateX(1.5px);
+  }
+  75% {
+    transform: translateX(-1px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .submit-form input.vibrating {
+    animation: none;
+  }
+}
+
+.input-measure {
+  position: absolute;
+  visibility: hidden;
+  top: 0;
+  left: 0;
+  /* 입력창의 테두리(3px) + 왼쪽 패딩(14px)과 정확히 같아야, offsetWidth가 곧
+     입력창 좌측 끝(border-box) 기준 실제 텍스트 시작 x좌표가 된다. */
+  padding-left: 17px;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 22px;
+  white-space: pre;
+}
+
+/* 타이핑할 때마다 그 위치(뷰포트 기준 고정 좌표)에서 원형으로 터져 아래로
+   자유낙하하는 파티클 — position:fixed라 아무리 떨어져도 문서 스크롤 영역이
+   늘어나지 않는다(overflow:hidden 없이도 스크롤바가 생기지 않음). */
+.typing-burst {
+  position: fixed;
+  pointer-events: none;
+  z-index: 60;
+}
+
+.typing-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: var(--accent);
+  animation: typing-fall var(--typing-fall-ms, 750ms) ease-in forwards;
+}
+
+@keyframes typing-fall {
+  0% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  25% {
+    transform: translate(var(--bx), var(--by));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--bx), calc(var(--by) + 220px));
+    opacity: 0;
+  }
+}
+
 .submit-form input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .submit-form.feedback-correct input {

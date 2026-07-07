@@ -15,9 +15,15 @@ class Room(models.Model):
         ("playing", "playing"),
         ("finished", "finished"),
     ]
+    DIFFICULTY_CHOICES = [
+        ("easy", "easy"),
+        ("medium", "medium"),
+        ("hard", "hard"),
+    ]
 
     code = models.CharField(max_length=16, unique=True)  # 초대/입장 코드
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="waiting")
+    difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, default="medium")
     player1 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     player2 = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)

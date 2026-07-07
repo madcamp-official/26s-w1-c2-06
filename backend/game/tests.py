@@ -6,6 +6,7 @@
 """
 import json
 import time
+import unittest
 import uuid
 
 import redis
@@ -14,7 +15,10 @@ from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TransactionTestCase
 
+from . import matchmaking_scripts, redis_client, tier
 from .consumers import GameConsumer, compute_correct_score
+from .matchmaking_consumer import QUEUE_KEY, QUEUED_AT_KEY, MatchmakingConsumer
+from .matchmaking_scripts import MATCH_SCRIPT
 from .models import CodeSnippet, GameResult, Profile, Room
 from .redis_scripts import SUBMIT_SCRIPT
 from .snippet_cache import clear_snippet_pool
@@ -148,6 +152,104 @@ class SubmitScriptTests(SimpleTestCase):
         self.assertIsNone(self.redis.hget(f"codes:{self.room}", "6"))
 
 
+class MatchScriptTests(SimpleTestCase):
+    """랭크 매칭 큐 Lua 스크립트 단위 테스트 — 실제 로컬 Redis에 대고 EVAL 직접 호출."""
+
+    databases = set()
+
+    QUEUE_KEY = "mm:queue:test"
+    QUEUED_AT_KEY = "mm:queued_at:test"
+    BASE_RANGE = 50
+    EXPAND_STEP = 50
+    EXPAND_INTERVAL_MS = 10_000
+    MAX_RANGE = 1000
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.redis = redis.Redis(host="localhost", port=6379, decode_responses=True)
+        cls.script = cls.redis.register_script(MATCH_SCRIPT)
+
+    def tearDown(self):
+        self.redis.delete(self.QUEUE_KEY, self.QUEUED_AT_KEY)
+
+    def _join(self, user_id, rating, queued_ago_ms=0):
+        now_ms = int(time.time() * 1000)
+        self.redis.zadd(self.QUEUE_KEY, {str(user_id): rating})
+        self.redis.hset(self.QUEUED_AT_KEY, str(user_id), now_ms - queued_ago_ms)
+
+    def _try_match(self, user_id):
+        now_ms = int(time.time() * 1000)
+        return self.script(
+            keys=[self.QUEUE_KEY, self.QUEUED_AT_KEY],
+            args=[
+                str(user_id),
+                now_ms,
+                self.BASE_RANGE,
+                self.EXPAND_STEP,
+                self.EXPAND_INTERVAL_MS,
+                self.MAX_RANGE,
+            ],
+        )
+
+    def test_matches_closest_candidate_within_base_range(self):
+        self._join(1, 100)
+        self._join(2, 120)  # diff 20, base_range 50 이내
+        self._join(3, 300)  # 범위 밖
+
+        result, detail = self._try_match(1)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(detail, "2")
+        self.assertIsNone(self.redis.zscore(self.QUEUE_KEY, "1"))
+        self.assertIsNone(self.redis.zscore(self.QUEUE_KEY, "2"))
+        # 매칭 안 된 3번은 큐에 그대로 남아야 한다
+        self.assertIsNotNone(self.redis.zscore(self.QUEUE_KEY, "3"))
+
+    def test_no_candidate_in_range_stays_queued(self):
+        self._join(1, 100)
+        self._join(2, 300)  # base_range 밖
+
+        result, detail = self._try_match(1)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(detail, "no_match")
+        self.assertIsNotNone(self.redis.zscore(self.QUEUE_KEY, "1"))
+        self.assertIsNotNone(self.redis.zscore(self.QUEUE_KEY, "2"))
+
+    def test_self_not_queued_returns_not_queued(self):
+        result, detail = self._try_match(999)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(detail, "not_queued")
+
+    def test_already_matched_user_cannot_match_again(self):
+        """이중 매칭 방지 — A가 B를 이미 매칭해간 뒤, B 자신의 재시도가 다른 후보(C)와
+        엉뚱하게 다시 매칭되지 않고 not_queued로 즉시 빠져야 한다."""
+        self._join(1, 100)  # A
+        self._join(2, 110)  # B
+        self._join(3, 105)  # C — A/B 둘 다와 범위 안
+
+        result_a, detail_a = self._try_match(1)
+        self.assertEqual(result_a, 1)  # A가 먼저 매칭 성사 (B 또는 C 중 가장 가까운 쪽)
+
+        # B가 매칭되어 사라졌든 아니든, matched partner를 제외한 나머지가 자기 자신으로
+        # 재시도했을 때 이미 없어진 유저는 not_queued여야 한다
+        matched_partner = detail_a
+        result_b, detail_b = self._try_match(int(matched_partner))
+        self.assertEqual((result_b, detail_b), (0, "not_queued"))
+
+    def test_range_expands_with_wait_time(self):
+        # base_range(50) 밖이지만, 오래 대기해서 확장된 범위 안에 들어오는 경우
+        self._join(1, 100, queued_ago_ms=self.EXPAND_INTERVAL_MS * 2)  # range: 50+100=150
+        self._join(2, 220)  # diff 120 — base_range 밖, 확장된 range(150) 안
+
+        result, detail = self._try_match(1)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(detail, "2")
+
+
 class GameEndLockTests(SimpleTestCase):
     """게임 종료 동시 트리거 방지(§6) — 같은 방에 대해 game_end_lock 획득 요청을
     두 번 보냈을 때 정확히 하나만 통과하는지 확인한다."""
@@ -211,11 +313,17 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         comm1 = await self._connect(self.user1)
         comm2 = await self._connect(self.user2)
 
-        # 호스트(user1)가 게임 시작 → 양쪽 다 game.start 브로드캐스트를 받는다
+        # 호스트(user1)가 게임 시작 → 양쪽 다 먼저 game.starting(카운트다운)을 받는다
         await comm1.send_to(text_data=json.dumps({"type": "game.start"}))
 
-        start1 = await comm1.receive_json_from(timeout=2)
-        start2 = await comm2.receive_json_from(timeout=2)
+        starting1 = await comm1.receive_json_from(timeout=2)
+        starting2 = await comm2.receive_json_from(timeout=2)
+        self.assertEqual(starting1["type"], "game.starting")
+        self.assertEqual(starting2["type"], "game.starting")
+
+        # PREGAME_COUNTDOWN_MS(3000ms) 경과 후 game.start 브로드캐스트
+        start1 = await comm1.receive_json_from(timeout=5)
+        start2 = await comm2.receive_json_from(timeout=5)
         self.assertEqual(start1["type"], "game.start")
         self.assertEqual(start2["type"], "game.start")
 
@@ -244,6 +352,75 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         await comm2.disconnect()
 
 
+class MatchmakingConsumerIntegrationTests(TransactionTestCase):
+    """랭크 매칭 큐 connect → queue.joined → match.found 흐름을 실제 Channels
+    WebsocketCommunicator + 로컬 Redis로 검증한다."""
+
+    def setUp(self):
+        # 컨슈머가 쓰는 전역 비동기 Redis 클라이언트(redis_client.get_redis())는 프로세스당
+        # 1개로 캐시되는데, Django가 async 테스트 메서드마다 새 이벤트 루프를 만들어서
+        # 돌리는 탓에 이전 테스트의 루프에 묶인 커넥션을 재사용하면 "Event loop is
+        # closed"로 깨진다 — 매 테스트마다 리셋해서 이번 테스트의 루프에서 새로 만들게 한다.
+        redis_client._redis_client = None
+        matchmaking_scripts._match_script = None  # 위와 동일한 이유 — Script 객체도 옛 클라이언트를 들고 있다
+        self.user1 = User.objects.create_user(username=f"mm1-{uuid.uuid4().hex[:6]}", password="pw12345")
+        self.user2 = User.objects.create_user(username=f"mm2-{uuid.uuid4().hex[:6]}", password="pw12345")
+        Profile.objects.create(user=self.user1)  # 기본 iron/0 — 둘 다 R=0, 같은 범위
+        Profile.objects.create(user=self.user2)
+        self.redis = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+    def tearDown(self):
+        self.redis.zrem(QUEUE_KEY, str(self.user1.id), str(self.user2.id))
+        self.redis.hdel(QUEUED_AT_KEY, str(self.user1.id), str(self.user2.id))
+
+    async def _connect(self, user):
+        communicator = WebsocketCommunicator(MatchmakingConsumer.as_asgi(), "/ws/matchmaking/")
+        communicator.scope["user"] = user
+        connected, _ = await communicator.connect()
+        self.assertTrue(connected)
+        return communicator
+
+    async def test_two_queued_users_get_matched_into_ranked_room(self):
+        comm1 = await self._connect(self.user1)
+        joined1 = await comm1.receive_json_from(timeout=2)
+        self.assertEqual(joined1["type"], "queue.joined")
+
+        comm2 = await self._connect(self.user2)
+        joined2 = await comm2.receive_json_from(timeout=2)
+        self.assertEqual(joined2["type"], "queue.joined")
+
+        # user2가 접속하자마자 대기 중이던 user1과 즉시 매칭 성사 — 둘 다 동일한 room
+        # 코드를 담은 match.found를 받는다
+        found1 = await comm1.receive_json_from(timeout=2)
+        found2 = await comm2.receive_json_from(timeout=2)
+        self.assertEqual(found1["type"], "match.found")
+        self.assertEqual(found2["type"], "match.found")
+        self.assertEqual(found1["code"], found2["code"])
+
+        room = await self._get_room(found1["code"])
+        self.assertTrue(room.is_ranked)
+        self.assertEqual({room.player1_id, room.player2_id}, {self.user1.id, self.user2.id})
+
+        # 매칭 성사와 함께 서버가 양쪽 다 close() 하므로 큐에는 아무도 안 남아야 한다
+        self.assertIsNone(self.redis.zscore(QUEUE_KEY, str(self.user1.id)))
+        self.assertIsNone(self.redis.zscore(QUEUE_KEY, str(self.user2.id)))
+
+        await comm1.disconnect()
+        await comm2.disconnect()
+
+    async def test_disconnect_before_match_leaves_queue(self):
+        comm1 = await self._connect(self.user1)
+        await comm1.receive_json_from(timeout=2)  # queue.joined
+
+        await comm1.disconnect()
+
+        self.assertIsNone(self.redis.zscore(QUEUE_KEY, str(self.user1.id)))
+
+    @database_sync_to_async
+    def _get_room(self, code):
+        return Room.objects.get(code=code)
+
+
 class GameResultRematchPersistenceTests(TransactionTestCase):
     """재대결로 같은 room에 여러 판이 쌓일 때 GameResult 저장이 올바른지 검증한다.
 
@@ -264,9 +441,9 @@ class GameResultRematchPersistenceTests(TransactionTestCase):
         self.consumer = GameConsumer()
         self.consumer.room_code = self.room.code
 
-    async def _persist(self, started_at_ms, score1, score2, winner_id):
+    async def _persist(self, started_at_ms, score1, score2, winner_id, is_ranked=False):
         await self.consumer._persist_game_result(
-            self.room.id, started_at_ms, self.user1.id, self.user2.id, score1, score2, winner_id
+            self.room.id, started_at_ms, self.user1.id, self.user2.id, score1, score2, winner_id, is_ranked
         )
 
     @database_sync_to_async
@@ -276,6 +453,31 @@ class GameResultRematchPersistenceTests(TransactionTestCase):
     @database_sync_to_async
     def _total_score(self, user):
         return Profile.objects.get(user_id=user.id).total_score
+
+    @database_sync_to_async
+    def _tier_state(self, user):
+        p = Profile.objects.get(user_id=user.id)
+        return (p.tier, p.tier_score)
+
+    async def test_ranked_game_applies_tier_delta_to_winner_and_loser(self):
+        # 둘 다 기본 iron/0(동급전)이라 승/패는 정확히 ±20이어야 한다
+        await self._persist(1_000, 500, -500, self.user1.id, is_ranked=True)
+
+        self.assertEqual(await self._tier_state(self.user1), ("iron", 20))
+        self.assertEqual(await self._tier_state(self.user2), ("iron", 0))  # 아이언 하한 고정(-20)
+
+    async def test_friendly_game_does_not_touch_tier(self):
+        await self._persist(1_000, 500, -500, self.user1.id, is_ranked=False)
+
+        self.assertEqual(await self._tier_state(self.user1), ("iron", 0))
+        self.assertEqual(await self._tier_state(self.user2), ("iron", 0))
+
+    async def test_retrying_same_ranked_round_does_not_double_apply_tier(self):
+        await self._persist(1_000, 500, -500, self.user1.id, is_ranked=True)
+        # 크래시 후 같은 판 재시도를 흉내낸다 — get_or_create가 created=False라 스킵돼야 함
+        await self._persist(1_000, 500, -500, self.user1.id, is_ranked=True)
+
+        self.assertEqual(await self._tier_state(self.user1), ("iron", 20))
 
     async def test_rematch_rounds_create_separate_rows_and_keep_best_score(self):
         await self._persist(1_000, 500, -500, self.user1.id)
@@ -293,4 +495,66 @@ class GameResultRematchPersistenceTests(TransactionTestCase):
         await self._persist(1_000, 500, -500, self.user1.id)
 
         self.assertEqual(await self._result_count(), 1)
-        self.assertEqual(await self._total_score(self.user1), 500)
+
+
+class _FakeProfile:
+    def __init__(self, tier_name, tier_score):
+        self.tier = tier_name
+        self.tier_score = tier_score
+
+
+class TierFormulaTests(unittest.TestCase):
+    def test_quantized_gap_within_threshold_is_zero(self):
+        self.assertEqual(tier.quantized_gap(0), 0)
+        self.assertEqual(tier.quantized_gap(20), 0)
+        self.assertEqual(tier.quantized_gap(-20), 0)
+
+    def test_quantized_gap_steps_by_20_beyond_threshold(self):
+        self.assertEqual(tier.quantized_gap(21), 20)
+        self.assertEqual(tier.quantized_gap(40), 20)
+        self.assertEqual(tier.quantized_gap(41), 40)
+        self.assertEqual(tier.quantized_gap(-41), -40)
+
+    def test_expected_score_even_match_is_half(self):
+        self.assertEqual(tier.expected_score(100, 100), 0.5)
+        self.assertEqual(tier.expected_score(100, 110), 0.5)  # gap 10 <= 20 문턱
+
+    def test_tier_delta_even_match_win_loss_are_exactly_20(self):
+        self.assertEqual(tier.tier_delta(100, 100, 1), 20)
+        self.assertEqual(tier.tier_delta(100, 100, 0), -20)
+        self.assertEqual(tier.tier_delta(100, 100, 0.5), 0)
+
+    def test_rating_combines_tier_index_and_score(self):
+        self.assertEqual(tier.rating("iron", 0), 0)
+        self.assertEqual(tier.rating("gold", 42), 342)
+        self.assertEqual(tier.rating("challenger", 150), 750)
+
+    def test_promotion_carries_over_excess(self):
+        p = _FakeProfile("bronze", 95)
+        tier.apply_tier_result(p, 20)  # 95+20=115
+        self.assertEqual(p.tier, "silver")
+        self.assertEqual(p.tier_score, 15)
+
+    def test_demotion_borrows_100(self):
+        p = _FakeProfile("gold", 10)
+        tier.apply_tier_result(p, -35)  # 10-35=-25
+        self.assertEqual(p.tier, "silver")
+        self.assertEqual(p.tier_score, 75)
+
+    def test_iron_floors_at_zero(self):
+        p = _FakeProfile("iron", 5)
+        tier.apply_tier_result(p, -40)
+        self.assertEqual(p.tier, "iron")
+        self.assertEqual(p.tier_score, 0)
+
+    def test_challenger_has_no_promotion_ceiling(self):
+        p = _FakeProfile("challenger", 90)
+        tier.apply_tier_result(p, 40)  # 90+40=130, 승급 상한 없음
+        self.assertEqual(p.tier, "challenger")
+        self.assertEqual(p.tier_score, 130)
+
+    def test_challenger_can_be_demoted(self):
+        p = _FakeProfile("challenger", 10)
+        tier.apply_tier_result(p, -30)  # 10-30=-20
+        self.assertEqual(p.tier, "diamond")
+        self.assertEqual(p.tier_score, 80)

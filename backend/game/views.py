@@ -6,7 +6,7 @@ from django.utils.crypto import get_random_string
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import Profile, Room
+from .models import CodeSnippet, Profile, Room
 
 User = get_user_model()
 
@@ -143,6 +143,17 @@ def leaderboard(request):
             break
 
     return JsonResponse({"entries": entries, "me": me})
+
+
+@require_GET
+def practice_snippets(request):
+    """연습모드 전용 — 프론트가 로컬로 스폰/낙하/봇 입력/점수를 시뮬레이션할 수 있도록
+    스니펫 목록만 내려준다. Room/Redis 게임 파이프라인은 전혀 쓰지 않는다."""
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "not_authenticated"}, status=401)
+
+    snippets = list(CodeSnippet.objects.values("id", "text", "is_correct"))
+    return JsonResponse({"snippets": snippets})
 
 
 @require_GET

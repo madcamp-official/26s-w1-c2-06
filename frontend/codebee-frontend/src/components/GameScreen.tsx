@@ -45,6 +45,23 @@ function hashToPercent(seed: string): number {
   return Math.abs(hash) % 90;
 }
 
+// .falling-code는 폰트 22px 모노스페이스 + 좌우 padding 10px씩. 실측 대신 대략적인
+// 글자 폭으로 너비를 추정해서, 코드가 길수록 fall-field 가장자리에서 더 안쪽에
+// 떨어지도록 좌우 위치 범위를 좁힌다 — 그래야 overflow:hidden에 잘리지 않는다.
+const CHAR_WIDTH_PX = 13;
+const CODE_PADDING_PX = 24;
+
+function clampedLeftPercent(seed: string, text: string, containerWidth: number): number {
+  const rawPercent = hashToPercent(seed);
+  if (containerWidth <= 0) return rawPercent;
+
+  const halfWidthPercent = ((text.length * CHAR_WIDTH_PX + CODE_PADDING_PX) / 2 / containerWidth) * 100;
+  const min = halfWidthPercent;
+  const max = 100 - halfWidthPercent;
+  if (min > max) return 50; // 코드가 컨테이너보다 넓을 정도면 그냥 가운데
+  return Math.min(max, Math.max(min, rawPercent));
+}
+
 // 지금까지 입력한 내용이 이 코드의 접두사와 일치하면, 일치한 부분만 색을 바꿔 하이라이트한다.
 function renderCodeText(text: string, typedInput: string) {
   if (typedInput.length === 0 || !text.startsWith(typedInput)) {
@@ -101,6 +118,20 @@ function GameScreen({
   const myScoreRef = useRef<HTMLDivElement>(null);
   const opponentScoreRef = useRef<HTMLDivElement>(null);
 
+  // 코드가 좌우 가장자리에서 잘리지 않도록, fall-field 실제 너비를 재서 위치 계산에 쓴다.
+  const fallFieldRef = useRef<HTMLDivElement>(null);
+  const [fallFieldWidth, setFallFieldWidth] = useState(0);
+
+  useEffect(() => {
+    const el = fallFieldRef.current;
+    if (!el) return;
+    const update = () => setFallFieldWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   // 점수판에 도착한 벌이 원래 자리로 돌아가는 연출 — codeId별 왕복 경로(dx, dy의 역방향).
   const [returningBees, setReturningBees] = useState<
     Record<string, { startLeft: number; startTop: number; dx: number; dy: number }>
@@ -119,18 +150,6 @@ function GameScreen({
   // 글자를 칠 때마다 입력창이 가볍게 떨리는 이펙트.
   const [inputVibrating, setInputVibrating] = useState(false);
   const vibrateTimeoutRef = useRef<number | null>(null);
-
-  // 인게임 화면에 들어올 때(=이 컴포넌트가 새로 마운트될 때) 3, 2, 1 시작 카운트다운을
-  // 화면 중앙에 보여준다. 실제 라운드는 서버 기준으로 이미 시작돼 있어서 순수 연출이다.
-  const [startCountdown, setStartCountdown] = useState<number | null>(3);
-
-  useEffect(() => {
-    if (startCountdown === null) return;
-    const timer = window.setTimeout(() => {
-      setStartCountdown((s) => (s === null || s <= 1 ? null : s - 1));
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [startCountdown]);
 
   useEffect(() => {
     let frame: number;
@@ -264,18 +283,6 @@ function GameScreen({
 
   return (
     <div className="game-screen">
-      {startCountdown !== null && (
-        <div className="start-countdown-overlay" key={`start-${startCountdown}`} aria-hidden="true">
-          {startCountdown}
-        </div>
-      )}
-
-      {remainingSec > 0 && remainingSec <= 10 && (
-        <div className="countdown-overlay" key={remainingSec} aria-hidden="true">
-          {remainingSec}
-        </div>
-      )}
-
       <div className="game-hud">
         <div className="score-box" ref={myScoreRef}>
           <span className="score-label">{myUsername ?? (myUserId !== null ? '나' : '나(확인 중)')}</span>
@@ -290,7 +297,12 @@ function GameScreen({
               ))}
           </div>
         </div>
-        <div className="game-timer">{remainingSec}s</div>
+        <div
+          className={`game-timer ${remainingSec > 0 && remainingSec <= 10 ? 'game-timer-critical' : ''}`}
+          key={remainingSec <= 10 ? remainingSec : undefined}
+        >
+          {remainingSec}s
+        </div>
         <div className="score-box score-box-right" ref={opponentScoreRef}>
           <span className="score-label">{opponentUsername ?? '상대'}</span>
           <span className="score-value">{opponentScore}</span>
@@ -306,7 +318,7 @@ function GameScreen({
         </div>
       </div>
 
-      <div className="fall-field">
+      <div className="fall-field" ref={fallFieldRef}>
         {falling.map((code) => {
           const resolution = code.resolution;
           const flyTarget = flyTargets[code.codeId];
@@ -333,7 +345,7 @@ function GameScreen({
               } as CSSProperties
             : {
                 top: `${progress * 100}%`,
-                left: `${hashToPercent(code.codeId)}%`,
+                left: `${clampedLeftPercent(code.codeId, code.text, fallFieldWidth)}%`,
                 '--resolve-ms': `${RESOLVE_ANIM_MS}ms`,
               } as CSSProperties;
           return (

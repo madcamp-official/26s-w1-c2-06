@@ -1,6 +1,15 @@
+import type { Tier } from './lib/tier';
+
 export interface User {
   id: number;
   username: string;
+}
+
+// GET /api/me/tier/ 응답 — rating은 백엔드가 미리 계산해서 내려줌(TIER_INDEX*100+tier_score).
+export interface TierInfo {
+  tier: Tier;
+  tier_score: number;
+  rating: number;
 }
 
 export type RoomStatus = 'waiting' | 'playing' | 'finished';
@@ -44,4 +53,10 @@ export interface ScorePop {
   id: string;
   userId: number;
   delta: number;
+}
+
+export interface PracticeSnippet {
+  id: number;
+  text: string;
+  is_correct: boolean;
 }

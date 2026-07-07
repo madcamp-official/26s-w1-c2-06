@@ -7,6 +7,27 @@
   box-sizing: border-box;
 }
 
+/* 게임 시작 전 3초 카운트다운 — 서버 game.starting을 받는 즉시 대기실 화면 위에
+   뜬다(아직 room.status는 waiting). countdown-pulse 애니메이션은 GameScreen.css의
+   .countdown-overlay와 공유. "준비"를 뜻하는 보라색으로 구분한다. */
+.start-countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 95;
+  font-family: var(--pixel-display);
+  font-size: 160px;
+  color: var(--accent);
+  text-shadow:
+    0 0 24px rgba(192, 132, 252, 0.85),
+    0 0 48px rgba(192, 132, 252, 0.5);
+  opacity: 0;
+  animation: countdown-pulse 900ms ease-out forwards;
+}
+
 /* 게임 규칙 모달 — 어떤 화면(로비/방/결산) 위에서 열려도 항상 최상단에 오버랩 */
 .rules-overlay {
   position: fixed;
@@ -535,6 +556,23 @@
   margin: 0;
 }
 
+.tier-delta-line {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tier-delta-line.positive {
+  color: var(--neon-green);
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.6);
+}
+
+.tier-delta-line.negative {
+  color: var(--neon-red);
+  text-shadow: 0 0 8px rgba(255, 42, 109, 0.6);
+}
+
 .difficulty-picker {
   display: flex;
   align-items: center;
@@ -595,8 +633,10 @@
   .player-slot.filled,
   .winner-badge,
   .rules-overlay,
-  .rules-modal {
+  .rules-modal,
+  .start-countdown-overlay {
     animation: none;
+    opacity: 1;
   }
 }
 

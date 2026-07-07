@@ -14,20 +14,20 @@ function LoginPage() {
   const signupSuccess = Boolean((location.state as { signupSuccess?: boolean } | null)?.signupSuccess);
 
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
-    if (!username || !password) {
-      setError('아이디와 비밀번호를 모두 입력해주세요.');
+    if (!username) {
+      setError('아이디를 입력해주세요.');
       return;
     }
     setError(null);
     setSubmitting(true);
     try {
-      const user = await login(username, password);
+      const user = await login(username, String(password));
       setUser(user);
       navigate('/lobby', { replace: true });
     } catch (err) {
@@ -54,13 +54,18 @@ function LoginPage() {
           />
         </label>
         <label className="field">
-          <span>비밀번호</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+          <span>비밀번호 (0~9999)</span>
+          <div className="password-slider-row">
+            <input
+              type="range"
+              min={0}
+              max={9999}
+              value={password}
+              onChange={(e) => setPassword(Number(e.target.value))}
+              className="password-slider"
+            />
+            <span className="password-slider-value">{String(password).padStart(4, '0')}</span>
+          </div>
         </label>
 
         {error && <p className="field-error">{error}</p>}

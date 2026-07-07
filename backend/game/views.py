@@ -79,6 +79,7 @@ def _room_payload(room):
     return {
         "code": room.code,
         "status": room.status,
+        "difficulty": room.difficulty,
         "player1": room.player1.username if room.player1 else None,
         "player2": room.player2.username if room.player2 else None,
     }
@@ -89,7 +90,12 @@ def create_room(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
 
-    room = Room.objects.create(code=_generate_room_code(), player1=request.user)
+    data = json.loads(request.body or b"{}")
+    difficulty = data.get("difficulty", "medium")
+    if difficulty not in dict(Room.DIFFICULTY_CHOICES):
+        return JsonResponse({"error": "invalid_difficulty"}, status=400)
+
+    room = Room.objects.create(code=_generate_room_code(), player1=request.user, difficulty=difficulty)
     return JsonResponse({**_room_payload(room), "is_host": True}, status=201)
 
 

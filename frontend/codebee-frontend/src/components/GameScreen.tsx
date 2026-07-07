@@ -44,6 +44,19 @@ function hashToPercent(seed: string): number {
   return Math.abs(hash) % 90;
 }
 
+// 지금까지 입력한 내용이 이 코드의 접두사와 일치하면, 일치한 부분만 색을 바꿔 하이라이트한다.
+function renderCodeText(text: string, typedInput: string) {
+  if (typedInput.length === 0 || !text.startsWith(typedInput)) {
+    return text;
+  }
+  return (
+    <>
+      <span className="code-typed">{text.slice(0, typedInput.length)}</span>
+      {text.slice(typedInput.length)}
+    </>
+  );
+}
+
 // 코드를 물고 나르는 벌 아이콘 — 픽셀 느낌의 각진 사각형으로만 구성.
 function BeeIcon({ flapping }: { flapping?: boolean }) {
   return (
@@ -118,6 +131,18 @@ function GameScreen({
   // 글자를 칠 때마다 입력창이 가볍게 떨리는 이펙트.
   const [inputVibrating, setInputVibrating] = useState(false);
   const vibrateTimeoutRef = useRef<number | null>(null);
+
+  // 인게임 화면에 들어올 때(=이 컴포넌트가 새로 마운트될 때) 3, 2, 1 시작 카운트다운을
+  // 화면 중앙에 보여준다. 실제 라운드는 서버 기준으로 이미 시작돼 있어서 순수 연출이다.
+  const [startCountdown, setStartCountdown] = useState<number | null>(3);
+
+  useEffect(() => {
+    if (startCountdown === null) return;
+    const timer = window.setTimeout(() => {
+      setStartCountdown((s) => (s === null || s <= 1 ? null : s - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [startCountdown]);
 
   useEffect(() => {
     let frame: number;
@@ -247,6 +272,12 @@ function GameScreen({
 
   return (
     <div className="game-screen">
+      {startCountdown !== null && (
+        <div className="start-countdown-overlay" key={`start-${startCountdown}`} aria-hidden="true">
+          {startCountdown}
+        </div>
+      )}
+
       {remainingSec > 0 && remainingSec <= 10 && (
         <div className="countdown-overlay" key={remainingSec} aria-hidden="true">
           {remainingSec}
@@ -323,7 +354,7 @@ function GameScreen({
               className={`falling-code ${resolvedClass}`}
               style={style}
             >
-              {code.text}
+              {resolution ? code.text : renderCodeText(code.text, input)}
               {resolution && (
                 <>
                   <span className="particle-burst" aria-hidden="true">

@@ -1,17 +1,19 @@
+/* 기기의 라이트/다크 설정과 무관하게 항상 다크(검정 계열) 테마로 고정한다 —
+   더 이상 prefers-color-scheme을 따라가지 않는다. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
+  --text: #9ca3af;
+  --text-h: #f3f4f6;
+  --bg: #000;
+  --border: #2e303a;
+  --code-bg: #0b0b0f;
+  --accent: #c084fc;
+  --accent-bg: rgba(192, 132, 252, 0.15);
+  --accent-border: rgba(192, 132, 252, 0.5);
   --sting: #ffb020;
   --neon-green: #39ff14;
   --neon-red: #ff2a6d;
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow: 4px 4px 0 rgba(8, 6, 13, 0.25);
+  --social-bg: rgba(47, 48, 58, 0.5);
+  --shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
   /* 모눈종이 그리드 — 배경 이미지 레이어 목록이라, 각 패널에서
      `background: var(--grid-pattern), <바탕색>;`처럼 마지막에 바탕색을 얹어 쓴다. */
   --grid-pattern:
@@ -27,7 +29,7 @@
 
   font: 15px/165% var(--sans);
   letter-spacing: 0.18px;
-  color-scheme: light dark;
+  color-scheme: dark;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -39,23 +41,8 @@
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow: 4px 4px 0 rgba(0, 0, 0, 0.6);
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+#social .button-icon {
+  filter: invert(1) brightness(2);
 }
 
 #root {

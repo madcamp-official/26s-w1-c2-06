@@ -5,9 +5,12 @@
   gap: 16px;
   padding: 24px 20px;
   box-sizing: border-box;
+  /* 라이트/다크 모드 등 컴퓨터 설정과 무관하게 게임 화면은 항상 검은 배경 */
+  background: #000;
 }
 
-/* 남은 시간 10초 이하일 때 화면 중앙에 크게 뜨는 카운트다운 */
+/* 남은 시간 10초 이하일 때 화면 중앙에 크게 뜨는 카운트다운. key={remainingSec}로
+   숫자가 바뀔 때마다 이 요소를 새로 마운트해서, 매번 처음부터 애니메이션이 재생된다. */
 .countdown-overlay {
   position: fixed;
   inset: 0;
@@ -22,35 +25,61 @@
   text-shadow:
     0 0 24px rgba(255, 176, 32, 0.85),
     0 0 48px rgba(255, 176, 32, 0.5);
-  animation: countdown-pulse 1s ease-out;
+  opacity: 0;
+  animation: countdown-pulse 900ms ease-out forwards;
 }
 
 @keyframes countdown-pulse {
+  /* 등장: 확대된 상태에서 축소되며 페이드인 */
   0% {
-    transform: scale(1.7);
+    transform: scale(2.5);
     opacity: 0;
   }
-  15% {
+  30% {
     transform: scale(1);
     opacity: 1;
   }
-  80% {
+  /* 유지 */
+  70% {
     transform: scale(1);
     opacity: 1;
   }
+  /* 퇴장: 크기 변화 없이 페이드아웃 */
   100% {
-    transform: scale(0.9);
+    transform: scale(1);
     opacity: 0;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .countdown-overlay {
-    animation: none;
-  }
+/* 인게임 화면에 들어오자마자 3초간 뜨는 시작 카운트다운. 남은 시간이 얼마 안
+   남았을 때 뜨는 .countdown-overlay와 같은 연출(countdown-pulse)을 재사용하되,
+   "준비"를 뜻하는 보라색으로 구분한다. */
+.start-countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 95;
+  font-family: var(--pixel-display);
+  font-size: 160px;
+  color: var(--accent);
+  text-shadow:
+    0 0 24px rgba(192, 132, 252, 0.85),
+    0 0 48px rgba(192, 132, 252, 0.5);
+  opacity: 0;
+  animation: countdown-pulse 900ms ease-out forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .countdown-overlay,
+  .start-countdown-overlay {
+    animation: none;
+    opacity: 1;
+    transform: scale(1);
+  }
+
   .submit-form.feedback-miss {
     animation: none;
   }
@@ -166,7 +195,11 @@
   min-height: 360px;
   border: 3px solid var(--text-h);
   border-radius: 0;
-  background: var(--grid-pattern), var(--code-bg);
+  /* 컴퓨터 설정과 무관하게 항상 검은 배경 위에 모눈만 은은하게 */
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 22px),
+    #000;
   background-size: 22px 22px;
   overflow: hidden;
 }
@@ -182,6 +215,16 @@
   border: 2px solid var(--border);
   color: var(--text-h);
   white-space: nowrap;
+  /* 마우스 드래그로 코드를 선택해서 복사/붙여넣기 하는 걸 막는다 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 지금까지 입력한 것과 일치하는 접두사 부분만 하이라이트 */
+.code-typed {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 700;
 }
 
 /* 판정 완료 후 점수판 쪽으로 날아가며 사라지는 연출 */

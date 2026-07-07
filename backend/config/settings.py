@@ -34,6 +34,10 @@ ALLOWED_HOSTS = [h for h in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(','
 # 통과하려면 실제 접속 오리진(scheme 포함)을 명시해야 한다.
 CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if o]
 
+# 정답 코드에 방해 아이템(alert/ink)이 붙을 확률 — QA 중 재배포 없이 조정할 수 있게
+# .env로 뺐다 (docs/plan/game-items.md).
+ITEM_ATTACH_PROB = float(os.environ.get('ITEM_ATTACH_PROB', '0.2'))
+
 
 # Application definition
 

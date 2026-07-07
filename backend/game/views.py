@@ -2,16 +2,13 @@ import json
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.http import JsonResponse
-from django.utils.crypto import get_random_string
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import CodeSnippet, Profile, Room
+from .room_codes import generate_room_code
 
 User = get_user_model()
-
-# 헷갈리는 문자(0/O, 1/I) 제외한 방 코드용 문자셋
-ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 @ensure_csrf_cookie
@@ -67,14 +64,6 @@ def me(request):
     return JsonResponse({"id": request.user.id, "username": request.user.username})
 
 
-def _generate_room_code():
-    for _ in range(10):
-        code = get_random_string(6, ROOM_CODE_CHARS)
-        if not Room.objects.filter(code=code).exists():
-            return code
-    raise RuntimeError("방 코드 생성 실패 — 재시도 초과")
-
-
 def _room_payload(room):
     return {
         "code": room.code,
@@ -95,7 +84,7 @@ def create_room(request):
     if difficulty not in dict(Room.DIFFICULTY_CHOICES):
         return JsonResponse({"error": "invalid_difficulty"}, status=400)
 
-    room = Room.objects.create(code=_generate_room_code(), player1=request.user, difficulty=difficulty)
+    room = Room.objects.create(code=generate_room_code(), player1=request.user, difficulty=difficulty)
     return JsonResponse({**_room_payload(room), "is_host": True}, status=201)
 
 

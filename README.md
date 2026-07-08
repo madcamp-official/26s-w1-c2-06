@@ -36,6 +36,7 @@
 
 > 구현할 기능을 사용자 관점에서 정리하고, 필수 기능과 선택 기능을 구분
 
+
 전체 아키텍처 설계는 [docs/plan/architecture.md](./docs/plan/architecture.md) 참고
 
 ### 필수 기능

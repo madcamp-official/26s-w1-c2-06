@@ -165,6 +165,25 @@ function LobbyPage() {
       });
   }, []);
 
+  // 로비에 머무르는 동안 다른 유저의 게임 종료로 랭킹이 바뀌는 걸 반영 — 플레이/연습 중엔
+  // Leaderboard 자체가 화면에 없으므로(638줄 렌더 조건과 동일) 폴링도 멈춘다.
+  useEffect(() => {
+    if (room?.status === 'playing' || practiceActive) return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const { entries, me, worst } = await getLeaderboard();
+        setLeaderboard(entries);
+        setMyLeaderboardRank(me);
+        setWorst(worst);
+      } catch {
+        // 폴링 실패는 조용히 무시하고 다음 주기에 재시도
+      }
+    }, 10000);
+
+    return () => window.clearInterval(timer);
+  }, [room?.status, practiceActive]);
+
   // 헤더에 상시 보여줄 내 티어 배지 — 최초 진입 시 한 번 불러온다.
   useEffect(() => {
     getMyTier()

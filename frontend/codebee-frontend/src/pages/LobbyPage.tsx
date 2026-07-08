@@ -9,11 +9,14 @@ import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
 import MatchmakingModal from '../components/MatchmakingModal';
+import PromotionBanner from '../components/PromotionBanner';
 import TierBadge from '../components/TierBadge';
 import PracticeMode from '../components/PracticeMode';
 import { useAuthStore } from '../store/authStore';
 import { DIFFICULTY_LABEL } from '../lib/gameConstants';
 import type { Difficulty } from '../lib/gameConstants';
+import { ratingToTier, TIERS } from '../lib/tier';
+import type { Tier } from '../lib/tier';
 import type {
   ActiveItemEffect,
   FallingCode,
@@ -63,12 +66,26 @@ function LobbyPage() {
   const [pregameCountdown, setPregameCountdown] = useState<number | null>(null);
   const [showMatchmaking, setShowMatchmaking] = useState(false);
   const [practiceActive, setPracticeActive] = useState(false);
+  // 친선전 패널 안에서 방 만들기/방 참가하기를 전환하는 탭
+  const [friendlyTab, setFriendlyTab] = useState<'create' | 'join'>('create');
+  // 이 방이 매칭으로 성사된 방인지 — 백엔드가 room 응답에 is_ranked를 안 내려주므로
+  // (docs/plan/architecture.md 갭) handleMatchFound를 거쳤는지로 프론트에서만 추적한다.
+  // true면 대기실 화면(방 코드/복사/난이도 선택) 대신 "매칭 완료" 화면을 보여주고,
+  // 방장 쪽에서 자동으로 게임을 시작시킨다 — 대기실이 노출되면 방 코드로 제3자가
+  // 끼어들 수 있는 문제(방 참가하기 API가 is_ranked를 모름)를 화면단에서 우회한다.
+  const [isRankedMatch, setIsRankedMatch] = useState(false);
+  // 위 state와 같은 값을 미러링하는 ref — room WS useEffect(아래) 안에서 읽는데,
+  // state를 의존성에 넣으면 값이 바뀔 때마다 소켓이 불필요하게 재연결돼버린다.
+  const isRankedMatchRef = useRef(false);
   // 매칭으로 들어간 판이 끝났을 때 티어 변동을 보여주기 위한 "매칭 성사 시점" 스냅샷.
   // handleSocketMessage(useCallback)에서 읽지 않고 ref로만 다뤄서, 값이 바뀌어도
   // 소켓 재연결을 유발하지 않게 한다(아래 room WS useEffect가 handleSocketMessage에
   // 의존하기 때문).
   const preMatchRatingRef = useRef<number | null>(null);
   const [tierDelta, setTierDelta] = useState<number | null>(null);
+  // 이번 판으로 티어 등급 자체가 올랐을 때만 채워짐 — 승급 연출(PromotionBanner)
+  // 트리거용. 점수만 오르내린 경우(등급은 그대로)엔 null로 두고 tierDelta 텍스트만 보여준다.
+  const [promotion, setPromotion] = useState<{ from: Tier; to: Tier } | null>(null);
   // 헤더에 상시 표시할 내 티어 — GET /api/me/tier/ 결과. 매칭 전/후, 랭크전 종료
   // 후에 갱신된다.
   const [myTier, setMyTier] = useState<TierInfo | null>(null);
@@ -147,6 +164,15 @@ function LobbyPage() {
       });
   }, []);
 
+  // 매칭 모달이 fresh하게 새로 조회하는 티어와 헤더 배지가 다르게 보이는 걸
+  // 막기 위해, 매칭을 시작하는 시점에 헤더 값도 같이 최신화한다.
+  useEffect(() => {
+    if (!showMatchmaking) return;
+    getMyTier()
+      .then(setMyTier)
+      .catch(() => {});
+  }, [showMatchmaking]);
+
   useEffect(() => {
     if (!showRules) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -205,13 +231,15 @@ function LobbyPage() {
       }
       case 'room.update': {
         const nextStatus = data.status as Room['status'];
+        const nextPlayer1 = data.player1 as string | null;
+        const nextPlayer2 = data.player2 as string | null;
         setRoom((prev) =>
           prev
             ? {
                 ...prev,
                 status: nextStatus,
-                player1: data.player1 as string | null,
-                player2: data.player2 as string | null,
+                player1: nextPlayer1,
+                player2: nextPlayer2,
               }
             : prev,
         );
@@ -227,8 +255,17 @@ function LobbyPage() {
           // 카운트다운 도중 상대가 나가는 등으로 시작이 취소된 경우도 여기로 옴
           setPregameCountdown(null);
           setTierDelta(null);
+          setPromotion(null);
           setInkEffects([]);
           setAlerts([]);
+
+          // 랭킹전은 대기실이 노출되지 않으므로(§LobbyPage 위쪽 주석) 상대가
+          // 게임 시작 전에 나가면 방에 혼자 남아 멈춰있게 된다 — 나도 방을 나가고
+          // 곧바로 다시 매칭 큐에 들어가게 한다.
+          if (isRankedMatchRef.current && (!nextPlayer1 || !nextPlayer2)) {
+            handleLeaveRoom();
+            setShowMatchmaking(true);
+          }
         }
         break;
       }
@@ -337,6 +374,13 @@ function LobbyPage() {
             .then((info) => {
               setMyTier(info);
               setTierDelta(info.rating - before);
+
+              const beforeTier = ratingToTier(before).tier;
+              setPromotion(
+                TIERS.indexOf(info.tier) > TIERS.indexOf(beforeTier)
+                  ? { from: beforeTier, to: info.tier }
+                  : null,
+              );
             })
             .catch(() => {});
         }
@@ -363,6 +407,14 @@ function LobbyPage() {
       // §9 클럭 오프셋 보정 — 여러 번 왕복해서 가장 RTT가 작은 샘플의 offset을 채택
       for (let i = 0; i < 5; i++) {
         socket.send(JSON.stringify({ type: 'clock.sync', client_sent_at: Date.now() }));
+      }
+
+      // 매칭으로 성사된 방은 대기실 화면을 안 보여주는 대신, 방장 쪽에서 곧바로
+      // 게임 시작을 걸어준다(수동 "게임 시작" 버튼 없음). 난이도는 서버가 두 사람의
+      // 티어를 평균 내주는 게 이상적이지만 백엔드 변경 없이는 알 수 없어 'normal'
+      // 고정 — 나중에 백엔드가 지원하면 여기만 바꾸면 된다.
+      if (room?.is_host && isRankedMatchRef.current) {
+        socket.send(JSON.stringify({ type: 'game.start', difficulty: 'normal' }));
       }
     };
 
@@ -421,6 +473,8 @@ function LobbyPage() {
   async function handleMatchFound(code: string) {
     setShowMatchmaking(false);
     setError(null);
+    setIsRankedMatch(true);
+    isRankedMatchRef.current = true;
 
     // 결산 화면에서 티어 변동을 보여주기 위해 매칭 성사 시점의 레이팅을 스냅샷.
     try {
@@ -473,6 +527,9 @@ function LobbyPage() {
     setClockOffset(0);
     setPregameCountdown(null);
     setTierDelta(null);
+    setPromotion(null);
+    setIsRankedMatch(false);
+    isRankedMatchRef.current = false;
     preMatchRatingRef.current = null;
     clockBestRttRef.current = Infinity;
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current);
@@ -576,48 +633,75 @@ function LobbyPage() {
       )}
 
       {!room && !practiceActive && (
-        <div className="lobby-actions">
-          <div className="lobby-card">
-            <h2>방 만들기</h2>
-            <p>새로운 방을 만들고 상대방을 초대하세요.</p>
-            <button type="button" className="btn-primary" onClick={handleCreateRoom} disabled={busy}>
-              {busy ? '생성 중...' : '방 만들기'}
-            </button>
-          </div>
-
-          <div className="lobby-card">
-            <h2>방 참가하기</h2>
-            <form onSubmit={handleJoinRoom}>
-              <label className="field">
-                <span>방 코드</span>
-                <input
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  placeholder="예: AB12CD"
-                  autoFocus
-                />
-              </label>
-              <button type="submit" className="btn-primary" disabled={busy}>
-                {busy ? '참가 중...' : '참가하기'}
+        <div className="lobby-content">
+          <div className="lobby-modes">
+            <div className="lobby-card mode-panel mode-ranked">
+              <h2>랭킹전</h2>
+              <p>비슷한 티어의 상대와 자동으로 매칭돼요. 승패에 따라 티어 점수가 바뀌어요.</p>
+              <button type="button" className="btn-primary" onClick={() => setShowMatchmaking(true)}>
+                매칭 시작
               </button>
-            </form>
+            </div>
+
+            <div className="lobby-card mode-panel mode-friendly">
+              <h2>친선전</h2>
+              <div className="friendly-tabs">
+                <button
+                  type="button"
+                  className={`friendly-tab-btn ${friendlyTab === 'create' ? 'selected' : ''}`}
+                  onClick={() => setFriendlyTab('create')}
+                >
+                  방 만들기
+                </button>
+                <button
+                  type="button"
+                  className={`friendly-tab-btn ${friendlyTab === 'join' ? 'selected' : ''}`}
+                  onClick={() => setFriendlyTab('join')}
+                >
+                  방 참가하기
+                </button>
+              </div>
+
+              {friendlyTab === 'create' ? (
+                <>
+                  <p>새로운 방을 만들고 상대방을 초대하세요.</p>
+                  <button type="button" className="btn-primary" onClick={handleCreateRoom} disabled={busy}>
+                    {busy ? '생성 중...' : '방 만들기'}
+                  </button>
+                </>
+              ) : (
+                <form onSubmit={handleJoinRoom}>
+                  <label className="field">
+                    <span>방 코드</span>
+                    <input
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      placeholder="예: AB12CD"
+                      autoFocus
+                    />
+                  </label>
+                  <button type="submit" className="btn-primary" disabled={busy}>
+                    {busy ? '참가 중...' : '참가하기'}
+                  </button>
+                </form>
+              )}
+            </div>
+
+            <div className="lobby-card mode-panel mode-practice">
+              <h2>연습 모드</h2>
+              <p>연습봇을 상대로 감을 익혀보세요. 결과는 저장되지 않아요.</p>
+              <button type="button" className="btn-primary" onClick={() => setPracticeActive(true)}>
+                연습 시작
+              </button>
+            </div>
           </div>
 
-          <div className="lobby-card">
-            <h2>랭크 매칭</h2>
-            <p>비슷한 티어의 상대와 자동으로 매칭돼요. 승패에 따라 티어 점수가 바뀌어요.</p>
-            <button type="button" className="btn-primary" onClick={() => setShowMatchmaking(true)}>
-              매칭 시작
-            </button>
-          </div>
-
-          <div className="lobby-card">
-            <h2>연습 모드</h2>
-            <p>연습봇을 상대로 감을 익혀보세요. 결과는 저장되지 않아요.</p>
-            <button type="button" className="btn-primary" onClick={() => setPracticeActive(true)}>
-              연습 시작
-            </button>
-          </div>
+          <Leaderboard
+            entries={leaderboard}
+            me={myLeaderboardRank}
+            myUsername={user?.username ?? null}
+            worst={worst}
+          />
         </div>
       )}
 
@@ -629,15 +713,6 @@ function LobbyPage() {
         <PracticeMode myUsername={user?.username ?? null} onExit={() => setPracticeActive(false)} />
       )}
 
-      {!room && !practiceActive && (
-        <Leaderboard
-          entries={leaderboard}
-          me={myLeaderboardRank}
-          myUsername={user?.username ?? null}
-          worst={worst}
-        />
-      )}
-
       {error && <p className="field-error">{error}</p>}
 
       {room && !gameOver && room.status === 'waiting' && pregameCountdown !== null && pregameCountdown > 0 && (
@@ -646,7 +721,31 @@ function LobbyPage() {
         </div>
       )}
 
-      {room && !gameOver && room.status === 'waiting' && (
+      {room && !gameOver && room.status === 'waiting' && isRankedMatch && (
+        <div className="room-status">
+          <h2>매칭 완료!</h2>
+          <span className="room-status-label">게임 준비 중</span>
+
+          <div className="player-slots">
+            <div className="player-slot filled">
+              <span className="player-role">나</span>
+              <span className="player-name">{youAreHost ? room.player1 : room.player2}</span>
+            </div>
+            <div className="player-slot filled">
+              <span className="player-role">상대</span>
+              <span className="player-name">{opponentUsername}</span>
+            </div>
+          </div>
+
+          <p className="room-hint">잠시 후 게임이 자동으로 시작돼요.</p>
+
+          <button type="button" className="btn-link" onClick={handleLeaveRoom}>
+            나가기
+          </button>
+        </div>
+      )}
+
+      {room && !gameOver && room.status === 'waiting' && !isRankedMatch && (
         <div className="room-status">
           <h2 className="room-code-heading">
             방 코드: {room.code}
@@ -741,6 +840,9 @@ function LobbyPage() {
                   ? 'DRAW'
                   : 'GAME OVER'}
           </div>
+
+          {promotion && <PromotionBanner from={promotion.from} to={promotion.to} />}
+
           <p className="room-hint">
             {resultOutcome === 'draw'
               ? '무승부입니다.'
@@ -750,7 +852,7 @@ function LobbyPage() {
                   ? '패배했습니다.'
                   : '게임이 종료되었습니다.'}
           </p>
-          {tierDelta !== null && (
+          {tierDelta !== null && !promotion && (
             <p className={`tier-delta-line ${tierDelta > 0 ? 'positive' : 'negative'}`}>
               티어 점수 {tierDelta > 0 ? `+${tierDelta}` : tierDelta}
             </p>
@@ -768,20 +870,16 @@ function LobbyPage() {
             </div>
           </div>
 
-          <Leaderboard
-            entries={leaderboard}
-            me={myLeaderboardRank}
-            myUsername={user?.username ?? null}
-            worst={worst}
-          />
-
-          {youAreHost ? (
-            <button type="button" className="btn-primary" onClick={handleRematch}>
-              재대결
-            </button>
-          ) : (
-            <p className="room-hint">방장이 재대결을 시작하면 자동으로 전환됩니다.</p>
-          )}
+          {/* 랭킹전은 매칭으로 성사된 일회성 대전이라 재대결 개념이 없다 —
+              방을 나가면 §room.update 핸들러가 자동으로 다시 매칭을 걸어준다. */}
+          {!isRankedMatch &&
+            (youAreHost ? (
+              <button type="button" className="btn-primary" onClick={handleRematch}>
+                재대결
+              </button>
+            ) : (
+              <p className="room-hint">방장이 재대결을 시작하면 자동으로 전환됩니다.</p>
+            ))}
           <button type="button" className="btn-link" onClick={handleLeaveRoom}>
             로비로 돌아가기
           </button>

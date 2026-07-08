@@ -38,7 +38,7 @@ export const DIFFICULTY_PRESETS: Record<Difficulty, { spawnTickMs: number; fallS
 // 연습봇 반응 간격 — 백엔드엔 없는 프론트 전용 값(연습모드 전용 개념). 같은
 // 난이도 선택 하나로 스폰/낙하 속도와 봇 반응 속도를 함께 조절한다.
 export const BOT_INTERVAL_MS: Record<Difficulty, number> = {
-  easy: 4500,
-  normal: 3000,
-  hard: 1800,
+  easy: 5000,
+  normal: 4000,
+  hard: 3000,
 };

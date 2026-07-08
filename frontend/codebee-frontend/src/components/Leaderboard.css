@@ -13,6 +13,14 @@
   color: var(--text);
 }
 
+/* "전체 랭킹" 섹션 전체를 감싸는 테두리 — 하위권 섹션(.leaderboard-worst)과
+   대비되는 차분한 고정 테두리로 구역을 분리한다. */
+.leaderboard-top {
+  padding: 12px 12px 4px;
+  border: 3px solid var(--text-h);
+  box-sizing: border-box;
+}
+
 .leaderboard-list {
   display: flex;
   flex-direction: column;
@@ -20,6 +28,17 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  /* 동점자 그룹이 표기 인원 수(top 5 / worst 3)를 넘어서면 전부 표기하고
+     스크롤로 보게 한다 — 약 5줄 높이로 고정. 스크롤은 되지만 스크롤바 자체는
+     안 보이게 숨긴다(기능만 유지). */
+  max-height: 264px;
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 레거시 Edge/IE */
+}
+
+.leaderboard-list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/신형 Edge */
 }
 
 .leaderboard-list li {
@@ -56,11 +75,6 @@
   color: var(--text-h);
 }
 
-.leaderboard-score {
-  font-family: var(--mono);
-  color: var(--text-h);
-}
-
 /* 1/2/3등 — 랭크 숫자 위에 왕관/메달을 얹고 금은동 네온으로 강조 */
 .rank-medal {
   position: absolute;
@@ -84,8 +98,7 @@
 .leaderboard-list li.rank-1 {
   border-color: var(--neon-gold);
 }
-.leaderboard-list li.rank-1 .leaderboard-rank,
-.leaderboard-list li.rank-1 .leaderboard-score {
+.leaderboard-list li.rank-1 .leaderboard-rank {
   color: var(--neon-gold);
   text-shadow:
     0 0 6px var(--neon-gold),
@@ -95,8 +108,7 @@
 .leaderboard-list li.rank-2 {
   border-color: var(--neon-silver);
 }
-.leaderboard-list li.rank-2 .leaderboard-rank,
-.leaderboard-list li.rank-2 .leaderboard-score {
+.leaderboard-list li.rank-2 .leaderboard-rank {
   color: var(--neon-silver);
   text-shadow:
     0 0 6px var(--neon-silver),
@@ -106,8 +118,7 @@
 .leaderboard-list li.rank-3 {
   border-color: var(--neon-bronze);
 }
-.leaderboard-list li.rank-3 .leaderboard-rank,
-.leaderboard-list li.rank-3 .leaderboard-score {
+.leaderboard-list li.rank-3 .leaderboard-rank {
   color: var(--neon-bronze);
   text-shadow:
     0 0 6px var(--neon-bronze),
@@ -203,12 +214,14 @@
     worst-item-glow 1.4s ease-in-out infinite;
 }
 
-.worst-list li.worst-entry:nth-child(2) {
+/* 동점자 그룹으로 하위권 인원이 3명을 넘어설 수 있어 nth-child(2)/(3) 고정
+   대신 3개 주기로 색이 순환하게 한다. */
+.worst-list li.worst-entry:nth-child(3n + 2) {
   --worst-glow: var(--neon-magenta);
   animation-delay: 0.25s, 0.25s;
 }
 
-.worst-list li.worst-entry:nth-child(3) {
+.worst-list li.worst-entry:nth-child(3n) {
   --worst-glow: var(--neon-cyan);
   animation-delay: 0.5s, 0.5s;
 }

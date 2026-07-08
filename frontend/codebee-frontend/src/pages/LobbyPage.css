@@ -247,6 +247,76 @@
   gap: 12px;
 }
 
+/* 로비 모드 3분할 — 왼쪽에 랭킹전/친선전/연습모드 패널을 세로로, 오른쪽에
+   리더보드를 배치한다. .lobby-actions/.lobby-card는 PracticeMode.tsx의 내부
+   설정 화면이 그대로 재사용하고 있어 손대지 않고, 컨테이너만 새로 만든다. */
+.lobby-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 32px;
+}
+
+@media (max-width: 900px) {
+  .lobby-content {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+.lobby-modes {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  width: 360px;
+  flex-shrink: 0;
+}
+
+.mode-ranked {
+  --panel-glow: rgba(192, 132, 252, 0.5);
+}
+
+.mode-friendly {
+  --panel-glow: rgba(0, 240, 255, 0.5);
+}
+
+.mode-practice {
+  --panel-glow: rgba(57, 255, 20, 0.4);
+}
+
+.friendly-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.friendly-tab-btn {
+  flex: 1;
+  font: inherit;
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 2px solid var(--border);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  cursor: inherit;
+}
+
+.friendly-tab-btn.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 700;
+  animation: btn-neon-bloom 2.2s ease-in-out infinite;
+}
+
+.lobby-content .leaderboard {
+  margin: 0;
+  flex: 1 1 320px;
+  max-width: 480px;
+}
+
 .room-status {
   --panel-glow: rgba(192, 132, 252, 0.45);
   width: 100%;
@@ -624,6 +694,7 @@
   }
 
   .difficulty-btn.selected,
+  .friendly-tab-btn.selected,
   .lobby-header::after,
   .lobby-card,
   .room-status,

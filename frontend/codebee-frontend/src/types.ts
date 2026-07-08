@@ -53,12 +53,15 @@ export interface GameOverInfo {
 export interface LeaderboardEntry {
   rank: number;
   username: string;
-  total_score: number;
+  tier: Tier;
+  tier_score: number;
 }
 
 export interface WorstEntry {
+  rank: number;
   username: string;
-  total_score: number;
+  tier: Tier;
+  tier_score: number;
 }
 
 export interface ScorePop {

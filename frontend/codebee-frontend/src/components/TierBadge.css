@@ -1,21 +1,58 @@
 .tier-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
+  gap: 8px;
+  padding: 6px 14px;
   border: 2px solid var(--tier-color, var(--accent));
   background: color-mix(in srgb, var(--tier-color, var(--accent)) 14%, transparent);
   color: var(--tier-color, var(--accent));
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 16px;
   font-weight: 700;
   text-shadow: 0 0 6px var(--tier-color, var(--accent));
   box-shadow: 0 0 8px color-mix(in srgb, var(--tier-color, var(--accent)) 50%, transparent);
   white-space: nowrap;
 }
 
+.tier-badge .tier-icon {
+  width: 26px;
+  height: 26px;
+}
+
 .tier-badge-score {
-  padding-left: 5px;
+  padding-left: 8px;
   border-left: 1px solid var(--tier-color, var(--accent));
   opacity: 0.85;
+}
+
+/* 다이아/챌린저 — 단색 대신 두 색을 대각선으로 섞은 그라데이션. 테두리는
+   border-image로, 라벨/점수 텍스트는 background-clip:text로 그라데이션을
+   입힌다(아이콘 자체 그라데이션은 TierIcon.tsx가 SVG linearGradient로 처리). */
+.tier-badge.has-gradient {
+  border-image: linear-gradient(135deg, var(--tier-color-a), var(--tier-color-b)) 1;
+}
+
+.tier-badge.has-gradient .tier-badge-label,
+.tier-badge.has-gradient .tier-badge-score {
+  background-image: linear-gradient(135deg, var(--tier-color-a), var(--tier-color-b));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+
+/* 리더보드 목록처럼 여러 개가 한 줄씩 나열되는 좁은 공간에서 쓰는 축소판 */
+.tier-badge.compact {
+  gap: 5px;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.tier-badge.compact .tier-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.tier-badge.compact .tier-badge-score {
+  padding-left: 5px;
 }

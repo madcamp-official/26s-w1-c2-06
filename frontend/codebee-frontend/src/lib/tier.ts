@@ -20,8 +20,15 @@ export const TIER_COLOR: Record<Tier, string> = {
   silver: '#d9dbe5',
   gold: '#ffd700',
   platinum: '#00f0ff',
-  diamond: '#60a5fa',
+  diamond: '#7dd3fc',
   challenger: '#ff2af5',
+};
+
+// 다이아/챌린저는 단색 대신 두 색을 대각선 그라데이션으로 섞어 "고급진" 느낌을
+// 낸다 — 뱃지 테두리·텍스트·아이콘 채우기에 재사용(TierBadge/TierIcon 참고).
+export const TIER_GRADIENT: Partial<Record<Tier, [string, string]>> = {
+  diamond: ['#7dd3fc', '#c084fc'],
+  challenger: ['#ff2af5', '#ffd700'],
 };
 
 // rating(정수) -> {tier, tierScore}. 챌린저는 상한이 없어 rating이 600을 넘어갈 수

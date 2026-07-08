@@ -1,0 +1,38 @@
+.tier-icon {
+  width: 20px;
+  height: 20px;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.tier-shape-main {
+  fill: color-mix(in srgb, var(--tier-color, var(--accent)) 22%, transparent);
+  stroke: var(--tier-color, var(--accent));
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+
+.tier-shape-accent,
+.tier-shape-jewel {
+  fill: var(--tier-color, var(--accent));
+}
+
+.tier-shape-facet {
+  fill: color-mix(in srgb, var(--tier-color, var(--accent)) 55%, white 20%);
+  opacity: 0.85;
+}
+
+.tier-shape-facet-tri {
+  fill: color-mix(in srgb, var(--tier-color, var(--accent)) 40%, transparent);
+  stroke: var(--tier-color, var(--accent));
+  stroke-width: 0.6;
+}
+
+.tier-shape-base {
+  fill: var(--tier-color, var(--accent));
+  opacity: 0.9;
+}
+
+.tier-shape-glow {
+  filter: drop-shadow(0 0 2px var(--tier-color, var(--accent)));
+}

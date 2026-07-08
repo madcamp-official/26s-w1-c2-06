@@ -488,6 +488,20 @@
   }
 }
 
+.result-emoji.win-emoji {
+  animation: emoji-bounce 600ms ease-in-out infinite;
+}
+
+@keyframes emoji-bounce {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-8deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(8deg);
+  }
+}
+
 .result-banner.draw {
   background: var(--accent);
   border-color: var(--text-h);

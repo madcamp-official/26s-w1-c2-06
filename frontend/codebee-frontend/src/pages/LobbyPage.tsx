@@ -637,6 +637,8 @@ function LobbyPage() {
         <Logo />
         {room?.status !== 'playing' && !practiceActive && (
           <div className="lobby-header-user">
+            <TierBadge tier={myTier?.tier} tierScore={myTier?.tier_score} />
+            <span>{user?.username}님 환영합니다</span>
             <button
               type="button"
               className="btn-link btn-icon"
@@ -646,8 +648,6 @@ function LobbyPage() {
             >
               <SettingsIcon />
             </button>
-            <TierBadge tier={myTier?.tier} tierScore={myTier?.tier_score} />
-            <span>{user?.username}님 환영합니다</span>
           </div>
         )}
       </header>
@@ -899,6 +899,11 @@ function LobbyPage() {
       {room && gameOver && (
         <div className={`room-status result-${resultOutcome}`}>
           <div className={`result-banner ${resultOutcome}`}>
+            {resultOutcome === 'win' && (
+              <span className="result-emoji win-emoji" aria-hidden="true">
+                🎉
+              </span>
+            )}
             {resultOutcome === 'lose' && (
               <span className="result-emoji" aria-hidden="true">
                 😡

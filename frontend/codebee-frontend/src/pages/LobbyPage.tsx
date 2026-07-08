@@ -63,6 +63,17 @@ function LobbyPage() {
   const [pregameCountdown, setPregameCountdown] = useState<number | null>(null);
   const [showMatchmaking, setShowMatchmaking] = useState(false);
   const [practiceActive, setPracticeActive] = useState(false);
+  // 친선전 패널 안에서 방 만들기/방 참가하기를 전환하는 탭
+  const [friendlyTab, setFriendlyTab] = useState<'create' | 'join'>('create');
+  // 이 방이 매칭으로 성사된 방인지 — 백엔드가 room 응답에 is_ranked를 안 내려주므로
+  // (docs/plan/architecture.md 갭) handleMatchFound를 거쳤는지로 프론트에서만 추적한다.
+  // true면 대기실 화면(방 코드/복사/난이도 선택) 대신 "매칭 완료" 화면을 보여주고,
+  // 방장 쪽에서 자동으로 게임을 시작시킨다 — 대기실이 노출되면 방 코드로 제3자가
+  // 끼어들 수 있는 문제(방 참가하기 API가 is_ranked를 모름)를 화면단에서 우회한다.
+  const [isRankedMatch, setIsRankedMatch] = useState(false);
+  // 위 state와 같은 값을 미러링하는 ref — room WS useEffect(아래) 안에서 읽는데,
+  // state를 의존성에 넣으면 값이 바뀔 때마다 소켓이 불필요하게 재연결돼버린다.
+  const isRankedMatchRef = useRef(false);
   // 매칭으로 들어간 판이 끝났을 때 티어 변동을 보여주기 위한 "매칭 성사 시점" 스냅샷.
   // handleSocketMessage(useCallback)에서 읽지 않고 ref로만 다뤄서, 값이 바뀌어도
   // 소켓 재연결을 유발하지 않게 한다(아래 room WS useEffect가 handleSocketMessage에
@@ -364,6 +375,14 @@ function LobbyPage() {
       for (let i = 0; i < 5; i++) {
         socket.send(JSON.stringify({ type: 'clock.sync', client_sent_at: Date.now() }));
       }
+
+      // 매칭으로 성사된 방은 대기실 화면을 안 보여주는 대신, 방장 쪽에서 곧바로
+      // 게임 시작을 걸어준다(수동 "게임 시작" 버튼 없음). 난이도는 서버가 두 사람의
+      // 티어를 평균 내주는 게 이상적이지만 백엔드 변경 없이는 알 수 없어 'normal'
+      // 고정 — 나중에 백엔드가 지원하면 여기만 바꾸면 된다.
+      if (room?.is_host && isRankedMatchRef.current) {
+        socket.send(JSON.stringify({ type: 'game.start', difficulty: 'normal' }));
+      }
     };
 
     socket.onmessage = (event) => {
@@ -421,6 +440,8 @@ function LobbyPage() {
   async function handleMatchFound(code: string) {
     setShowMatchmaking(false);
     setError(null);
+    setIsRankedMatch(true);
+    isRankedMatchRef.current = true;
 
     // 결산 화면에서 티어 변동을 보여주기 위해 매칭 성사 시점의 레이팅을 스냅샷.
     try {
@@ -473,6 +494,8 @@ function LobbyPage() {
     setClockOffset(0);
     setPregameCountdown(null);
     setTierDelta(null);
+    setIsRankedMatch(false);
+    isRankedMatchRef.current = false;
     preMatchRatingRef.current = null;
     clockBestRttRef.current = Infinity;
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current);
@@ -576,48 +599,75 @@ function LobbyPage() {
       )}
 
       {!room && !practiceActive && (
-        <div className="lobby-actions">
-          <div className="lobby-card">
-            <h2>방 만들기</h2>
-            <p>새로운 방을 만들고 상대방을 초대하세요.</p>
-            <button type="button" className="btn-primary" onClick={handleCreateRoom} disabled={busy}>
-              {busy ? '생성 중...' : '방 만들기'}
-            </button>
-          </div>
-
-          <div className="lobby-card">
-            <h2>방 참가하기</h2>
-            <form onSubmit={handleJoinRoom}>
-              <label className="field">
-                <span>방 코드</span>
-                <input
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  placeholder="예: AB12CD"
-                  autoFocus
-                />
-              </label>
-              <button type="submit" className="btn-primary" disabled={busy}>
-                {busy ? '참가 중...' : '참가하기'}
+        <div className="lobby-content">
+          <div className="lobby-modes">
+            <div className="lobby-card mode-panel mode-ranked">
+              <h2>랭킹전</h2>
+              <p>비슷한 티어의 상대와 자동으로 매칭돼요. 승패에 따라 티어 점수가 바뀌어요.</p>
+              <button type="button" className="btn-primary" onClick={() => setShowMatchmaking(true)}>
+                매칭 시작
               </button>
-            </form>
+            </div>
+
+            <div className="lobby-card mode-panel mode-friendly">
+              <h2>친선전</h2>
+              <div className="friendly-tabs">
+                <button
+                  type="button"
+                  className={`friendly-tab-btn ${friendlyTab === 'create' ? 'selected' : ''}`}
+                  onClick={() => setFriendlyTab('create')}
+                >
+                  방 만들기
+                </button>
+                <button
+                  type="button"
+                  className={`friendly-tab-btn ${friendlyTab === 'join' ? 'selected' : ''}`}
+                  onClick={() => setFriendlyTab('join')}
+                >
+                  방 참가하기
+                </button>
+              </div>
+
+              {friendlyTab === 'create' ? (
+                <>
+                  <p>새로운 방을 만들고 상대방을 초대하세요.</p>
+                  <button type="button" className="btn-primary" onClick={handleCreateRoom} disabled={busy}>
+                    {busy ? '생성 중...' : '방 만들기'}
+                  </button>
+                </>
+              ) : (
+                <form onSubmit={handleJoinRoom}>
+                  <label className="field">
+                    <span>방 코드</span>
+                    <input
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      placeholder="예: AB12CD"
+                      autoFocus
+                    />
+                  </label>
+                  <button type="submit" className="btn-primary" disabled={busy}>
+                    {busy ? '참가 중...' : '참가하기'}
+                  </button>
+                </form>
+              )}
+            </div>
+
+            <div className="lobby-card mode-panel mode-practice">
+              <h2>연습 모드</h2>
+              <p>연습봇을 상대로 감을 익혀보세요. 결과는 저장되지 않아요.</p>
+              <button type="button" className="btn-primary" onClick={() => setPracticeActive(true)}>
+                연습 시작
+              </button>
+            </div>
           </div>
 
-          <div className="lobby-card">
-            <h2>랭크 매칭</h2>
-            <p>비슷한 티어의 상대와 자동으로 매칭돼요. 승패에 따라 티어 점수가 바뀌어요.</p>
-            <button type="button" className="btn-primary" onClick={() => setShowMatchmaking(true)}>
-              매칭 시작
-            </button>
-          </div>
-
-          <div className="lobby-card">
-            <h2>연습 모드</h2>
-            <p>연습봇을 상대로 감을 익혀보세요. 결과는 저장되지 않아요.</p>
-            <button type="button" className="btn-primary" onClick={() => setPracticeActive(true)}>
-              연습 시작
-            </button>
-          </div>
+          <Leaderboard
+            entries={leaderboard}
+            me={myLeaderboardRank}
+            myUsername={user?.username ?? null}
+            worst={worst}
+          />
         </div>
       )}
 
@@ -629,15 +679,6 @@ function LobbyPage() {
         <PracticeMode myUsername={user?.username ?? null} onExit={() => setPracticeActive(false)} />
       )}
 
-      {!room && !practiceActive && (
-        <Leaderboard
-          entries={leaderboard}
-          me={myLeaderboardRank}
-          myUsername={user?.username ?? null}
-          worst={worst}
-        />
-      )}
-
       {error && <p className="field-error">{error}</p>}
 
       {room && !gameOver && room.status === 'waiting' && pregameCountdown !== null && pregameCountdown > 0 && (
@@ -646,7 +687,31 @@ function LobbyPage() {
         </div>
       )}
 
-      {room && !gameOver && room.status === 'waiting' && (
+      {room && !gameOver && room.status === 'waiting' && isRankedMatch && (
+        <div className="room-status">
+          <h2>매칭 완료!</h2>
+          <span className="room-status-label">게임 준비 중</span>
+
+          <div className="player-slots">
+            <div className="player-slot filled">
+              <span className="player-role">나</span>
+              <span className="player-name">{youAreHost ? room.player1 : room.player2}</span>
+            </div>
+            <div className="player-slot filled">
+              <span className="player-role">상대</span>
+              <span className="player-name">{opponentUsername}</span>
+            </div>
+          </div>
+
+          <p className="room-hint">잠시 후 게임이 자동으로 시작돼요.</p>
+
+          <button type="button" className="btn-link" onClick={handleLeaveRoom}>
+            나가기
+          </button>
+        </div>
+      )}
+
+      {room && !gameOver && room.status === 'waiting' && !isRankedMatch && (
         <div className="room-status">
           <h2 className="room-code-heading">
             방 코드: {room.code}

@@ -1,4 +1,5 @@
 import json
+import re
 
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.http import JsonResponse
@@ -27,6 +28,12 @@ def signup(request):
 
     if not username or not password:
         return JsonResponse({"error": "username_password_required"}, status=400)
+
+    # 비밀번호는 로그인 화면의 슬라이더(0000~9999)와 형식을 맞춰야 한다 — 자유
+    # 텍스트를 허용하면 슬라이더로는 재현할 수 없는 비밀번호가 만들어져 로그인이
+    # 원천적으로 불가능해진다.
+    if not re.fullmatch(r"\d{4}", password):
+        return JsonResponse({"error": "invalid_password_format"}, status=400)
 
     if User.objects.filter(username=username).exists():
         return JsonResponse({"error": "duplicate_username"}, status=400)
@@ -122,35 +129,79 @@ def join_room(request, code):
     return JsonResponse({**_room_payload(room), "is_host": False})
 
 
+CAP_TOP = 5
+CAP_WORST = 3
+
+
+def _ranked_groups(sorted_profiles, cap):
+    """rating이 같은 그룹을 통째로 묶어 공동순위를 매긴다.
+
+    첫 그룹은 인원수가 cap을 넘어도 항상 전부 포함한다(예: 공동 1위가 5명이면
+    5명 다 표기). 그다음 그룹부터는 더했을 때 cap을 넘으면 그 그룹은 통째로
+    제외한다(부분적으로 잘라서 보여주지 않음) — 표준 공동순위(동점자는 같은
+    rank, 다음 그룹은 인원수만큼 rank를 건너뜀) 방식.
+    """
+    result = []
+    i, n = 0, len(sorted_profiles)
+    while i < n:
+        j = i
+        while j < n and sorted_profiles[j].rating_value == sorted_profiles[i].rating_value:
+            j += 1
+        group = sorted_profiles[i:j]
+        if result and len(result) + len(group) > cap:
+            break
+        rank = i + 1
+        result.extend((rank, p) for p in group)
+        i = j
+    return result
+
+
+def _rank_of(user_id, sorted_profiles):
+    """sorted_profiles 안에서 user_id의 공동순위 rank를 찾는다(동점 그룹의 시작
+    인덱스+1). 없으면 None."""
+    for i, p in enumerate(sorted_profiles):
+        if p.user_id == user_id:
+            start = i
+            while start > 0 and sorted_profiles[start - 1].rating_value == p.rating_value:
+                start -= 1
+            return start + 1
+    return None
+
+
 @require_GET
 def leaderboard(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
 
-    # 랭킹은 0점 이하 유저를 제외하고 매긴다 — id를 타이브레이커로 둬서
-    # 동점자 순서가 요청마다 흔들리지 않게 한다.
-    ranked = list(
-        Profile.objects.select_related("user").filter(total_score__gt=0).order_by("-total_score", "id")
-    )
+    # 랭킹은 티어 점수(rating) 기준 — 실제로 한 판 이상 플레이한 유저만 대상으로
+    # 한다(total_score>0을 "플레이 이력 있음"의 프록시로 사용).
+    played = list(Profile.objects.select_related("user").filter(total_score__gt=0))
+    for p in played:
+        p.rating_value = tier.rating(p.tier, p.tier_score)
 
-    entries = [
-        {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
-        for i, p in enumerate(ranked[:5])
-    ]
+    def _entry(rank, p):
+        return {"rank": rank, "username": p.user.username, "tier": p.tier, "tier_score": p.tier_score}
+
+    # 전체 랭킹(top)은 rating이 0(아이언 0)을 초과하는 유저만 대상 — 티어 하락으로
+    # 바닥까지 떨어진 유저는 순위표에 올리지 않는다.
+    top_sorted = sorted((p for p in played if p.rating_value > 0), key=lambda p: (-p.rating_value, p.id))
+    top_groups = _ranked_groups(top_sorted, CAP_TOP)
+    entries = [_entry(rank, p) for rank, p in top_groups]
+    top_user_ids = {p.user_id for _, p in top_groups}
 
     me = None
-    for i, p in enumerate(ranked):
-        if p.user_id == request.user.id:
-            if i >= 5:  # 5위 밖일 때만 별도로 내려준다
-                me = {"rank": i + 1, "username": p.user.username, "total_score": p.total_score}
-            break
+    if request.user.id not in top_user_ids:
+        rank = _rank_of(request.user.id, top_sorted)
+        if rank is not None:
+            profile = next(p for p in top_sorted if p.user_id == request.user.id)
+            me = _entry(rank, profile)
 
-    # 하위권 놀리기용 — 정식 랭킹(0점 이하 제외)과 별개로, 전체 유저 중 점수가
-    # 가장 낮은 3명을 그대로 보여준다(0점 이하도 포함 — 오히려 그게 놀림감이다).
-    worst = [
-        {"username": p.user.username, "total_score": p.total_score}
-        for p in Profile.objects.select_related("user").order_by("total_score", "id")[:3]
-    ]
+    # 하위권(worst)은 전체 랭킹에 이미 나온 유저와 절대 겹치지 않게 제외하고 매긴다.
+    worst_sorted = sorted(
+        (p for p in played if p.user_id not in top_user_ids), key=lambda p: (p.rating_value, p.id)
+    )
+    worst_groups = _ranked_groups(worst_sorted, CAP_WORST)
+    worst = [_entry(rank, p) for rank, p in worst_groups]
 
     return JsonResponse({"entries": entries, "me": me, "worst": worst})
 

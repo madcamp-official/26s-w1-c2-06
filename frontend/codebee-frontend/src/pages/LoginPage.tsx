@@ -27,7 +27,7 @@ function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const user = await login(username, String(password));
+      const user = await login(username, String(password).padStart(4, '0'));
       setUser(user);
       navigate('/lobby', { replace: true });
     } catch (err) {

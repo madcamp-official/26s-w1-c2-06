@@ -13,7 +13,7 @@ import redis
 from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
 from . import matchmaking_scripts, redis_client, redis_scripts, tier
 from .consumers import GameConsumer, compute_correct_score
@@ -642,3 +642,48 @@ class TierFormulaTests(unittest.TestCase):
         tier.apply_tier_result(p, -30)  # 10-30=-20
         self.assertEqual(p.tier, "diamond")
         self.assertEqual(p.tier_score, 80)
+
+
+class LeaderboardViewTests(TestCase):
+    """회귀 테스트 — 티어는 올랐는데 total_score(역대 최고 점수)는 계속 0 이하인
+    유저가 리더보드에서 통째로 빠지던 버그(§leaderboard `played_user_ids` 계산).
+    승패는 점수 절댓값과 무관하게 결정되므로, 매 판 최종 점수가 0 이하였던
+    유저도 실제로는 여러 판을 이겨 티어가 오를 수 있다 — "플레이 이력 있음"을
+    total_score>0으로 판단하면 이런 유저가 전체 랭킹/하위권 어디에도 안 잡힌다.
+    """
+
+    def setUp(self):
+        self.viewer = User.objects.create_user(username=f"viewer-{uuid.uuid4().hex[:6]}", password="pw12345")
+        Profile.objects.create(user=self.viewer)
+
+        # 티어는 gold까지 올랐지만(승패로만 결정) 매 판 최종 점수는 0 이하였던 유저 —
+        # total_score가 여전히 0인 상태를 그대로 재현한다.
+        self.strong_but_zero_score = User.objects.create_user(
+            username=f"strong-{uuid.uuid4().hex[:6]}", password="pw12345"
+        )
+        Profile.objects.create(user=self.strong_but_zero_score, total_score=0, tier="gold", tier_score=50)
+
+        opponent = User.objects.create_user(username=f"opp-{uuid.uuid4().hex[:6]}", password="pw12345")
+        Profile.objects.create(user=opponent, total_score=0)
+
+        room = Room.objects.create(code=f"RM{uuid.uuid4().hex[:6].upper()}", is_ranked=True)
+        GameResult.objects.create(
+            room=room,
+            started_at_ms=1,
+            user1=self.strong_but_zero_score,
+            user2=opponent,
+            score1=0,
+            score2=-500,
+            winner=self.strong_but_zero_score,
+        )
+
+        self.client.force_login(self.viewer)
+
+    def test_user_with_zero_total_score_but_real_tier_appears_in_leaderboard(self):
+        response = self.client.get("/api/leaderboard/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        usernames = {entry["username"] for entry in data["entries"]}
+        usernames |= {entry["username"] for entry in data["worst"]}
+        self.assertIn(self.strong_but_zero_score.username, usernames)

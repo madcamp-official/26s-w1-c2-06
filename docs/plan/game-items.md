@@ -1,10 +1,10 @@
-# 아이템 시스템 (alert, 먹물) 설계
+# 아이템 시스템 (alert, 꿀) 설계
 
 ## 1. 배경 및 목표
 
 상대방을 방해하는 아이템 2종을 추가한다 — 스폰 시점에 서버가 부여 여부/종류를 결정하고, **정답 코드에만** 붙는다.
 
-- **먹물(ink)**: 상대방 화면에 먹물 이미지를 덮어서 낙하 중인 코드가 잘 안 보이게 함
+- **꿀(honey)**: 상대방 화면에 꿀 이미지를 덮어서 낙하 중인 코드가 잘 안 보이게 함
 - **alert**: 상대방이 타이핑하는 도중에 경고창을 띄워서, 그걸 닫아야 다시 타이핑할 수 있게 함
 
 두 효과 모두 **연출(지속시간, 애니메이션)은 프론트 책임**이고, 백엔드는 "어떤 코드에 어떤 아이템이 붙어있는지"와 "누가 그 코드를 맞혀서 발동시켰는지"만 원자적으로 결정해서 알려주면 된다. 아이템은 스폰된 낙하 코드에 배지로 보여서 **양쪽 플레이어 모두에게 미리 보인다** — 몰래 숨겨진 게 아니라 "이거 맞히면 상대 방해할 수 있다"를 알고 레이스하는 방식.
@@ -25,7 +25,7 @@
 "text\x01is_correct\x01spawn_ts\x01duration_ms\x01item"
 ```
 
-`item`은 `""`(없음) 또는 `"alert"`/`"ink"`. 필드가 하나 늘어날 뿐 기존 4개 필드의 의미·순서는 그대로라, 이미 이 값을 읽는 다른 코드(없음 — `codes:{room}`는 SUBMIT_SCRIPT에서만 파싱함)에 영향 없음.
+`item`은 `""`(없음) 또는 `"alert"`/`"honey"`. 필드가 하나 늘어날 뿐 기존 4개 필드의 의미·순서는 그대로라, 이미 이 값을 읽는 다른 코드(없음 — `codes:{room}`는 SUBMIT_SCRIPT에서만 파싱함)에 영향 없음.
 
 ## 3. 백엔드 구현
 
@@ -42,7 +42,7 @@ ITEM_ATTACH_PROB = float(os.environ.get('ITEM_ATTACH_PROB', '0.2'))
 # consumers.py
 from django.conf import settings
 
-ITEM_TYPES = ("alert", "ink")
+ITEM_TYPES = ("alert", "honey")
 ```
 
 `backend/.env.example`에도 추가:
@@ -174,23 +174,23 @@ async def code_result(self, event):
 
 ### 5-1. `code.spawn` — 배지 표시
 
-`item` 필드가 `null`이 아니면 낙하하는 코드 박스에 작은 아이콘 배지(먹물 방울 / 느낌표 등)를 얹는다. 순수 표시용이라 상태는 `LobbyPage.tsx`의 `fallingCodes` 배열에 `item` 필드만 추가해서 저장하면 됨(`scores`/`fallingCodes` state 갱신 패턴은 이미 있음).
+`item` 필드가 `null`이 아니면 낙하하는 코드 박스에 작은 아이콘 배지(꿀 방울 / 느낌표 등)를 얹는다. 순수 표시용이라 상태는 `LobbyPage.tsx`의 `fallingCodes` 배열에 `item` 필드만 추가해서 저장하면 됨(`scores`/`fallingCodes` state 갱신 패턴은 이미 있음).
 
 ### 5-2. `code.result` — 발동 트리거
 
 ```ts
 if (data.item && data.correct && userId !== myUserId) {
   // 상대방이 이 아이템 코드를 맞혔다 → 내 화면에 효과 발동
-  triggerItemEffect(data.item as 'alert' | 'ink');
+  triggerItemEffect(data.item as 'alert' | 'honey');
 }
 ```
 
 `userId === myUserId`(내가 맞힌 경우)면 아무 효과도 재생하지 않음 — 아이템은 상대방에게만 걸린다.
 
-### 5-3. 먹물(ink) 효과
+### 5-3. 꿀(honey) 효과
 
-- 게임 화면(낙하 영역) 위에 반투명 먹물 이미지/SVG를 오버레이로 띄워서 코드 텍스트 식별을 방해
-- 지속시간 `INK_EFFECT_MS = 3000`(3초) — `window.setTimeout`으로 제거. 이미 `scorePops` 배열에 id+타임아웃으로 추가/제거하는 패턴이 있으니 `activeInkEffects: { id, spawnedAt }[]` 같은 state를 동일한 방식으로 추가하면 기존 코드 스타일과 맞음
+- 게임 화면(낙하 영역) 위에 반투명 꿀 이미지/SVG를 오버레이로 띄워서 코드 텍스트 식별을 방해
+- 지속시간 `HONEY_EFFECT_MS = 3000`(3초) — `window.setTimeout`으로 제거. 이미 `scorePops` 배열에 id+타임아웃으로 추가/제거하는 패턴이 있으니 `activeHoneyEffects: { id, spawnedAt }[]` 같은 state를 동일한 방식으로 추가하면 기존 코드 스타일과 맞음
 - **중첩 처리(결정됨)**: 연속으로 맞으면 기존 효과를 연장하지 않고 그냥 새 항목을 배열에 추가 — 여러 개가 동시에 화면에 겹쳐 보이다가 각자 자기 타임아웃에 맞춰 개별적으로 사라짐(가장 간단한 구현, 이미 있는 `scorePops` 패턴 그대로 재사용 가능). 오래 방해받고 싶으면 상대가 아이템 코드를 계속 맞혀야 하므로 자연스럽게 "누적 방해"가 됨
 
 ### 5-4. alert 효과 — 커스텀 모달(결정됨)
@@ -198,7 +198,7 @@ if (data.item && data.correct && userId !== myUserId) {
 네이티브 `window.alert()` 대신 커스텀 모달로 구현한다 — 이미 프로젝트에 픽셀 폰트/캐릭터(BeeIcon 등) 테마가 있어서 시각적 일관성을 맞출 수 있고, 네이티브 alert이 JS 메인 스레드를 막아 WS 메시지 처리가 지연되는 부작용도 없다.
 
 - 동작: 오버레이 표시 + 타이핑 입력창 비활성화(`disabled` 또는 blur) → `ALERT_EFFECT_MS = 3000`(3초) 후 자동으로 닫히거나 "확인" 버튼으로 닫으면 입력창 재활성화 + 포커스 복귀
-- **중첩 처리(결정됨, ink와 동일 원칙)**: 연속으로 맞으면 모달을 여러 장 겹쳐 쌓는다(예: 살짝 어긋난 위치에 스택) — 전부 닫아야(또는 각자 타임아웃 지나야) 타이핑 재개. ink처럼 `activeAlerts: { id, spawnedAt }[]` 배열로 관리, 입력창은 "배열이 비어 있을 때만" 재활성화
+- **중첩 처리(결정됨, honey와 동일 원칙)**: 연속으로 맞으면 모달을 여러 장 겹쳐 쌓는다(예: 살짝 어긋난 위치에 스택) — 전부 닫아야(또는 각자 타임아웃 지나야) 타이핑 재개. honey처럼 `activeAlerts: { id, spawnedAt }[]` 배열로 관리, 입력창은 "배열이 비어 있을 때만" 재활성화
 
 ## 6. 테스트 영향 체크리스트
 
@@ -212,13 +212,13 @@ if (data.item && data.correct && userId !== myUserId) {
 ## 7. 결정 사항
 
 1. **alert는 커스텀 모달**(네이티브 `window.alert()` 안 씀) — §5-4
-2. **아이템 중첩 처리는 겹쳐서 보여줌**(지속시간 연장 아님) — ink/alert 둘 다 동일 원칙, §5-3/§5-4
+2. **아이템 중첩 처리는 겹쳐서 보여줌**(지속시간 연장 아님) — honey/alert 둘 다 동일 원칙, §5-3/§5-4
 3. **`ITEM_ATTACH_PROB`는 `.env`로 분리**, 값 `0.2` — §3-1
-4. **효과 지속시간은 ink/alert 둘 다 3초**(`INK_EFFECT_MS`/`ALERT_EFFECT_MS = 3000`) — §5-3/§5-4
+4. **효과 지속시간은 honey/alert 둘 다 3초**(`HONEY_EFFECT_MS`/`ALERT_EFFECT_MS = 3000`) — §5-3/§5-4
 
 ## 8. 구현 순서 제안
 
 1. `redis_scripts.py`: SUBMIT_SCRIPT 5필드 파싱 + 3-tuple 통일 (가장 위험한 부분 — 구현 직후 concurrency-reviewer 서브에이전트 검토 권장)
 2. `game/tests.py`: 위 6절 체크리스트 반영, 기존 테스트 통과 확인
 3. `consumers.py`: 상수 추가, `_try_spawn`/`_handle_submit`/`code_spawn`/`code_result` 핸들러 수정
-4. 프론트: `code.spawn` 배지, `code.result` 트리거 분기, ink 오버레이, alert 커스텀 모달(§5-3/§5-4)
+4. 프론트: `code.spawn` 배지, `code.result` 트리거 분기, honey 오버레이, alert 커스텀 모달(§5-3/§5-4)

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ratingToTier, TIER_LABEL } from '../lib/tier';
+import type { Tier } from '../lib/tier';
 import './MatchmakingModal.css';
 
 interface MatchmakingModalProps {
-  onMatchFound: (code: string) => void;
+  onMatchFound: (code: string, opponentTier: Tier | null, opponentTierScore: number | null) => void;
   onClose: () => void;
 }
 
@@ -42,7 +43,11 @@ function MatchmakingModal({ onMatchFound, onClose }: MatchmakingModalProps) {
         } else if (data.type === 'match.found') {
           matchedRef.current = true;
           closing = true;
-          onMatchFound(data.code as string);
+          onMatchFound(
+            data.code as string,
+            (data.opponent_tier as Tier | null) ?? null,
+            (data.opponent_tier_score as number | null) ?? null,
+          );
         } else if (data.type === 'queue.left') {
           closing = true;
           onClose();

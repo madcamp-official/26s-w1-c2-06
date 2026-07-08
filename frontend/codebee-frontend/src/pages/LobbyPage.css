@@ -7,6 +7,15 @@
   box-sizing: border-box;
 }
 
+/* 아이콘 하나만 담는 .btn-link 변형(사운드 설정 버튼 등) — 텍스트 버튼과 같은
+   높이를 유지하면서 정사각형에 가깝게 패딩만 좁힌다. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
 /* 게임 시작 전 3초 카운트다운 — 서버 game.starting을 받는 즉시 대기실 화면 위에
    뜬다(아직 room.status는 waiting). countdown-pulse 애니메이션은 GameScreen.css의
    .countdown-overlay와 공유. "준비"를 뜻하는 보라색으로 구분한다. */
@@ -476,6 +485,20 @@
   }
   50% {
     transform: rotate(10deg);
+  }
+}
+
+.result-emoji.win-emoji {
+  animation: emoji-bounce 600ms ease-in-out infinite;
+}
+
+@keyframes emoji-bounce {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-8deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(8deg);
   }
 }
 

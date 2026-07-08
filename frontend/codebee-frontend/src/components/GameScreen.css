@@ -447,43 +447,63 @@
   cursor: not-allowed;
 }
 
-/* 먹물 아이템 — fall-field 안에서만 덮어서 낙하 중인 코드 식별을 방해한다.
-   중첩되면 각자 다른 위치/각도(--blot-x/--blot-y/--blot-rotate, id 해시 기반)로
-   겹쳐 쌓인다(§7 결정). */
-.ink-blot {
+/* 꿀 아이템 — fall-field 안에서만 덮어서 낙하 중인 코드 식별을 방해한다. 원래는
+   검은 배경에 거의 묻히는 먹물이었는데, 검은 배경에서도 뚜렷이 보이도록
+   --sting/--neon-gold 계열 호박색 그라데이션 + 광택 하이라이트로 끈적한 꿀
+   덩어리처럼 보이게 바꿨다. 중첩되면 각자 다른 위치/각도(--blot-x/--blot-y/
+   --blot-rotate, id 해시 기반)로 겹쳐 쌓인다(§7 결정).
+
+   .honey-effect가 위치/회전을 잡는 컨테이너고, 그 안에 본체(.honey-blot)가
+   찰싹 달라붙는 스플랫 진입 애니메이션과 함께 나타난다. */
+.honey-effect {
   position: absolute;
   top: var(--blot-y, 30%);
   left: var(--blot-x, 30%);
   width: 55%;
   height: 55%;
   transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg));
-  border-radius: 42% 58% 61% 39% / 46% 41% 59% 54%;
-  background: radial-gradient(
-    circle at 40% 40%,
-    rgba(10, 10, 15, 0.96),
-    rgba(10, 10, 15, 0.85) 60%,
-    rgba(10, 10, 15, 0.55) 80%,
-    transparent 100%
-  );
-  filter: blur(2px);
   z-index: 40;
   pointer-events: none;
-  animation: ink-splat 220ms ease-out;
+  /* 찰싹 달라붙는 느낌 — 살짝 튕기는 overshoot으로 순간적으로 부딪혀 붙는 인상을 준다 */
+  animation: honey-splat-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-@keyframes ink-splat {
-  from {
-    transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(0.4);
+@keyframes honey-splat-in {
+  0% {
+    transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(0.15);
     opacity: 0;
   }
-  to {
+  55% {
+    transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(1.15);
+    opacity: 1;
+  }
+  100% {
     transform: translate(-50%, -50%) rotate(var(--blot-rotate, 0deg)) scale(1);
     opacity: 1;
   }
 }
 
+.honey-blot {
+  position: absolute;
+  inset: 0;
+  border-radius: 42% 58% 61% 39% / 46% 41% 59% 54%;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.55), transparent 22%),
+    radial-gradient(
+      circle at 45% 45%,
+      rgba(255, 214, 90, 0.95),
+      rgba(255, 176, 32, 0.9) 55%,
+      rgba(200, 120, 10, 0.85) 80%,
+      rgba(140, 80, 5, 0.6) 100%
+    );
+  box-shadow:
+    0 0 18px rgba(255, 176, 32, 0.55),
+    inset 0 0 14px rgba(255, 220, 120, 0.4);
+  filter: blur(1px);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ink-blot {
+  .honey-effect {
     animation: none;
   }
 }

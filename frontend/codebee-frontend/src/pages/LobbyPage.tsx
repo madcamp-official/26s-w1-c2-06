@@ -4,10 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import { logout } from '../api/auth';
 import { getErrorMessage } from '../api/client';
 import { createRoom, getLeaderboard, getRoom, joinRoom } from '../api/rooms';
+import { getMyTier } from '../api/tier';
 import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
+import MatchmakingModal from '../components/MatchmakingModal';
+import TierBadge from '../components/TierBadge';
+import PracticeMode from '../components/PracticeMode';
 import { useAuthStore } from '../store/authStore';
+import { DIFFICULTY_LABEL } from '../lib/gameConstants';
+import type { Difficulty } from '../lib/gameConstants';
 import type {
   ActiveItemEffect,
   FallingCode,
@@ -17,6 +23,7 @@ import type {
   Room,
   ScoreBoard,
   ScorePop,
+  TierInfo,
   WorstEntry,
 } from '../types';
 import './LobbyPage.css';
@@ -39,14 +46,6 @@ const WS_ERROR_LABEL: Record<string, string> = {
 const INK_EFFECT_MS = 3000;
 const ALERT_EFFECT_MS = 3000;
 
-type Difficulty = 'easy' | 'normal' | 'hard';
-
-const DIFFICULTY_LABEL: Record<Difficulty, string> = {
-  easy: '쉬움',
-  normal: '보통',
-  hard: '어려움',
-};
-
 function LobbyPage() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -59,6 +58,20 @@ function LobbyPage() {
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [showRules, setShowRules] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
+  // 게임 시작 전 3초 카운트다운 — 서버 game.starting을 받으면 초 단위로 세팅되고
+  // 1초마다 줄어든다. null이면 카운트다운 중이 아님(대기실 기본 상태).
+  const [pregameCountdown, setPregameCountdown] = useState<number | null>(null);
+  const [showMatchmaking, setShowMatchmaking] = useState(false);
+  const [practiceActive, setPracticeActive] = useState(false);
+  // 매칭으로 들어간 판이 끝났을 때 티어 변동을 보여주기 위한 "매칭 성사 시점" 스냅샷.
+  // handleSocketMessage(useCallback)에서 읽지 않고 ref로만 다뤄서, 값이 바뀌어도
+  // 소켓 재연결을 유발하지 않게 한다(아래 room WS useEffect가 handleSocketMessage에
+  // 의존하기 때문).
+  const preMatchRatingRef = useRef<number | null>(null);
+  const [tierDelta, setTierDelta] = useState<number | null>(null);
+  // 헤더에 상시 표시할 내 티어 — GET /api/me/tier/ 결과. 매칭 전/후, 랭크전 종료
+  // 후에 갱신된다.
+  const [myTier, setMyTier] = useState<TierInfo | null>(null);
 
   // --- 인게임 상태 (WebSocket 이벤트로만 갱신됨, backend-implementation.md §4~§6) ---
   const [fallingCodes, setFallingCodes] = useState<FallingCode[]>([]);
@@ -125,6 +138,15 @@ function LobbyPage() {
       });
   }, []);
 
+  // 헤더에 상시 보여줄 내 티어 배지 — 최초 진입 시 한 번 불러온다.
+  useEffect(() => {
+    getMyTier()
+      .then(setMyTier)
+      .catch(() => {
+        // 조회 실패는 조용히 무시 — 배지가 안 보일 뿐 게임 진행엔 지장 없다
+      });
+  }, []);
+
   useEffect(() => {
     if (!showRules) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -133,6 +155,18 @@ function LobbyPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showRules]);
+
+  useEffect(() => {
+    if (pregameCountdown === null) return;
+    if (pregameCountdown <= 0) {
+      setPregameCountdown(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPregameCountdown((s) => (s === null ? null : s - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [pregameCountdown]);
 
   const myUserId = user?.id ?? null;
 
@@ -190,9 +224,17 @@ function LobbyPage() {
           setGameDuration(null);
           setGameOver(null);
           setFeedback(null);
+          // 카운트다운 도중 상대가 나가는 등으로 시작이 취소된 경우도 여기로 옴
+          setPregameCountdown(null);
+          setTierDelta(null);
           setInkEffects([]);
           setAlerts([]);
         }
+        break;
+      }
+      case 'game.starting': {
+        // room.status는 아직 waiting — 대기실 화면 위에 3,2,1만 띄운다.
+        setPregameCountdown(Math.round((data.countdown as number) / 1000));
         break;
       }
       case 'game.start': {
@@ -202,6 +244,7 @@ function LobbyPage() {
         setFallingCodes([]);
         setScores({});
         setGameOver(null);
+        setPregameCountdown(null);
         setInkEffects([]);
         setAlerts([]);
         break;
@@ -284,6 +327,19 @@ function LobbyPage() {
           .catch(() => {
             // 리더보드 조회 실패는 결산 화면 표시를 막지 않고 조용히 무시한다
           });
+
+        // 매칭으로 들어온 판이었으면(preMatchRatingRef가 세팅돼 있으면) 티어가
+        // 얼마나 바뀌었는지 계산하고, 헤더 배지도 최신 값으로 갱신한다.
+        if (preMatchRatingRef.current !== null) {
+          const before = preMatchRatingRef.current;
+          preMatchRatingRef.current = null;
+          getMyTier()
+            .then((info) => {
+              setMyTier(info);
+              setTierDelta(info.rating - before);
+            })
+            .catch(() => {});
+        }
         break;
       }
       case 'error': {
@@ -362,6 +418,26 @@ function LobbyPage() {
     sendMessage({ type: 'game.start', difficulty });
   }
 
+  async function handleMatchFound(code: string) {
+    setShowMatchmaking(false);
+    setError(null);
+
+    // 결산 화면에서 티어 변동을 보여주기 위해 매칭 성사 시점의 레이팅을 스냅샷.
+    try {
+      const info = await getMyTier();
+      preMatchRatingRef.current = info.rating;
+    } catch {
+      preMatchRatingRef.current = null;
+    }
+
+    try {
+      const joined = await getRoom(code);
+      setRoom(joined);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
   function handleCopyRoomCode() {
     if (!room) return;
     navigator.clipboard
@@ -395,6 +471,9 @@ function LobbyPage() {
     setGameOver(null);
     setFeedback(null);
     setClockOffset(0);
+    setPregameCountdown(null);
+    setTierDelta(null);
+    preMatchRatingRef.current = null;
     clockBestRttRef.current = Infinity;
     if (feedbackTimeoutRef.current) window.clearTimeout(feedbackTimeoutRef.current);
 
@@ -447,11 +526,12 @@ function LobbyPage() {
     <div className="lobby-page">
       <header className="lobby-header">
         <Logo />
-        {room?.status !== 'playing' && (
+        {room?.status !== 'playing' && !practiceActive && (
           <div className="lobby-header-user">
             <button type="button" className="btn-link" onClick={() => setShowRules(true)}>
               게임 규칙
             </button>
+            <TierBadge tier={myTier?.tier} tierScore={myTier?.tier_score} />
             <span>{user?.username}님 환영합니다</span>
             <button type="button" className="btn-link" onClick={handleLogout}>
               로그아웃
@@ -485,7 +565,7 @@ function LobbyPage() {
             <ul className="rules-list">
               <li>60초 동안 상대보다 점수가 높으면 승리, 같으면 무승부예요.</li>
               <li>화면 위에서 코드 스니펫이 계속 떨어져요. 정답 코드만 골라서 입력창에 그대로 입력하고 Enter를 누르세요.</li>
-              <li>정답 코드를 맞히면 +500점, 오답 코드를 잘못 입력하면 -500점이에요.</li>
+              <li>정답 코드를 맞히면 코드 길이에 비례해 최대 1000점까지 얻고, 오답 코드를 잘못 입력하면 -500점이에요.</li>
               <li>같은 코드를 상대와 동시에 노려도 먼저 제출한 사람만 점수를 가져가요.</li>
               <li>화면 아래로 완전히 떨어진 코드는 더 이상 제출할 수 없어요.</li>
               <li>난이도(쉬움/보통/어려움)에 따라 코드가 생성되는 주기와 떨어지는 속도가 달라져요.</li>
@@ -495,7 +575,7 @@ function LobbyPage() {
         </div>
       )}
 
-      {!room && (
+      {!room && !practiceActive && (
         <div className="lobby-actions">
           <div className="lobby-card">
             <h2>방 만들기</h2>
@@ -522,10 +602,34 @@ function LobbyPage() {
               </button>
             </form>
           </div>
+
+          <div className="lobby-card">
+            <h2>랭크 매칭</h2>
+            <p>비슷한 티어의 상대와 자동으로 매칭돼요. 승패에 따라 티어 점수가 바뀌어요.</p>
+            <button type="button" className="btn-primary" onClick={() => setShowMatchmaking(true)}>
+              매칭 시작
+            </button>
+          </div>
+
+          <div className="lobby-card">
+            <h2>연습 모드</h2>
+            <p>연습봇을 상대로 감을 익혀보세요. 결과는 저장되지 않아요.</p>
+            <button type="button" className="btn-primary" onClick={() => setPracticeActive(true)}>
+              연습 시작
+            </button>
+          </div>
         </div>
       )}
 
-      {!room && (
+      {showMatchmaking && (
+        <MatchmakingModal onMatchFound={handleMatchFound} onClose={() => setShowMatchmaking(false)} />
+      )}
+
+      {practiceActive && (
+        <PracticeMode myUsername={user?.username ?? null} onExit={() => setPracticeActive(false)} />
+      )}
+
+      {!room && !practiceActive && (
         <Leaderboard
           entries={leaderboard}
           me={myLeaderboardRank}
@@ -535,6 +639,12 @@ function LobbyPage() {
       )}
 
       {error && <p className="field-error">{error}</p>}
+
+      {room && !gameOver && room.status === 'waiting' && pregameCountdown !== null && pregameCountdown > 0 && (
+        <div className="start-countdown-overlay" key={`start-${pregameCountdown}`} aria-hidden="true">
+          {pregameCountdown}
+        </div>
+      )}
 
       {room && !gameOver && room.status === 'waiting' && (
         <div className="room-status">
@@ -640,6 +750,11 @@ function LobbyPage() {
                   ? '패배했습니다.'
                   : '게임이 종료되었습니다.'}
           </p>
+          {tierDelta !== null && (
+            <p className={`tier-delta-line ${tierDelta > 0 ? 'positive' : 'negative'}`}>
+              티어 점수 {tierDelta > 0 ? `+${tierDelta}` : tierDelta}
+            </p>
+          )}
           <div className="player-slots">
             <div className={`player-slot filled ${resultSlotClass(true)}`}>
               <span className="player-role">내 점수</span>

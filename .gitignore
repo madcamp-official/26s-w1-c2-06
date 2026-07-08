@@ -5,12 +5,12 @@
 # Virtualenv
 # http://iamzed.com/2009/05/07/a-primer-on-virtualenv/
 .Python
-[Bb]in
-[Ii]nclude
-[Ll]ib
-[Ll]ib64
-[Ll]ocal
-[Ss]cripts
+backend/venv/[Bb]in
+backend/venv/[Ii]nclude
+backend/venv/[Ll]ib
+backend/venv/[Ll]ib64
+backend/venv/[Ll]ocal
+backend/venv/[Ss]cripts
 pyvenv.cfg
 .venv
 venv/

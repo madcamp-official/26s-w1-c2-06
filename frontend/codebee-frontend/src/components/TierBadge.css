@@ -1,0 +1,21 @@
+.tier-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 2px solid var(--tier-color, var(--accent));
+  background: color-mix(in srgb, var(--tier-color, var(--accent)) 14%, transparent);
+  color: var(--tier-color, var(--accent));
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 0 6px var(--tier-color, var(--accent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tier-color, var(--accent)) 50%, transparent);
+  white-space: nowrap;
+}
+
+.tier-badge-score {
+  padding-left: 5px;
+  border-left: 1px solid var(--tier-color, var(--accent));
+  opacity: 0.85;
+}

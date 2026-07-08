@@ -1,0 +1,45 @@
+.matchmaking-modal {
+  --panel-glow: rgba(0, 240, 255, 0.5);
+  width: 100%;
+  max-width: 360px;
+  padding: 28px 24px;
+  border: 3px solid var(--text-h);
+  border-radius: 0;
+  background: var(--grid-pattern), var(--code-bg);
+  background-size: 22px 22px;
+  text-align: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation:
+    rules-modal-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    panel-glow-pulse 2.6s ease-in-out 260ms infinite;
+}
+
+.matchmaking-modal h2 {
+  margin: 0;
+  color: var(--neon-cyan);
+  text-shadow: 0 0 10px var(--neon-cyan);
+}
+
+.matchmaking-timer {
+  margin: 0;
+  font-family: var(--pixel-display);
+  font-size: 28px;
+  color: var(--text-h);
+}
+
+.matchmaking-rating {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matchmaking-modal {
+    animation: none;
+  }
+}

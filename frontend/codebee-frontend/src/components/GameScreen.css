@@ -16,26 +16,6 @@
   font-size: 11px;
 }
 
-/* 남은 시간 10초 이하일 때 화면 중앙에 크게 뜨는 카운트다운. key={remainingSec}로
-   숫자가 바뀔 때마다 이 요소를 새로 마운트해서, 매번 처음부터 애니메이션이 재생된다. */
-.countdown-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 90;
-  font-family: var(--pixel-display);
-  font-size: 140px;
-  color: var(--sting);
-  text-shadow:
-    0 0 24px rgba(255, 176, 32, 0.85),
-    0 0 48px rgba(255, 176, 32, 0.5);
-  opacity: 0;
-  animation: countdown-pulse 900ms ease-out forwards;
-}
-
 @keyframes countdown-pulse {
   /* 등장: 확대된 상태에서 축소되며 페이드인 */
   0% {
@@ -58,33 +38,9 @@
   }
 }
 
-/* 인게임 화면에 들어오자마자 3초간 뜨는 시작 카운트다운. 남은 시간이 얼마 안
-   남았을 때 뜨는 .countdown-overlay와 같은 연출(countdown-pulse)을 재사용하되,
-   "준비"를 뜻하는 보라색으로 구분한다. */
-.start-countdown-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 95;
-  font-family: var(--pixel-display);
-  font-size: 160px;
-  color: var(--accent);
-  text-shadow:
-    0 0 24px rgba(192, 132, 252, 0.85),
-    0 0 48px rgba(192, 132, 252, 0.5);
-  opacity: 0;
-  animation: countdown-pulse 900ms ease-out forwards;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .countdown-overlay,
-  .start-countdown-overlay {
+  .game-timer-critical {
     animation: none;
-    opacity: 1;
-    transform: scale(1);
   }
 
   .submit-form.feedback-miss {
@@ -194,6 +150,25 @@
   font-weight: 400;
   font-family: var(--pixel-display);
   color: var(--accent);
+}
+
+/* 남은 시간 10초 이하 — 중앙 상단 타이머 자체가 붉게 물들고, 초마다(key로 재마운트)
+   크게 확대된 상태에서 훅 줄어드는 이펙트를 반복한다. */
+.game-timer-critical {
+  color: var(--neon-red);
+  text-shadow:
+    0 0 10px rgba(255, 42, 109, 0.85),
+    0 0 22px rgba(255, 42, 109, 0.5);
+  animation: timer-critical-shrink 900ms ease-out;
+}
+
+@keyframes timer-critical-shrink {
+  0% {
+    transform: scale(2.2);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .fall-field {

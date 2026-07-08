@@ -1,0 +1,14 @@
+.settings-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.gear-tooth,
+.gear-body {
+  fill: currentColor;
+}
+
+.gear-hole {
+  fill: var(--bg);
+}

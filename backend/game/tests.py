@@ -92,13 +92,13 @@ class SubmitScriptTests(SimpleTestCase):
         self.assertIsNone(self.redis.hget(f"codes:{self.room}", "1"))
 
     def test_correct_submission_with_item_returns_item(self):
-        self._seed_code("1b", "print(y)", is_correct=True, item="ink")
+        self._seed_code("1b", "print(y)", is_correct=True, item="honey")
 
         result, detail, item = self._submit("print(y)")
 
         self.assertEqual(result, 1)
         self.assertEqual(detail, "1b")
-        self.assertEqual(item, "ink")
+        self.assertEqual(item, "honey")
 
     def test_incorrect_submission_scores_minus_500_and_removes_code(self):
         self._seed_code("2", "print(x", is_correct=False)
@@ -266,6 +266,19 @@ class MatchScriptTests(SimpleTestCase):
         self.assertEqual(result, 1)
         self.assertEqual(detail, "2")
 
+    def test_range_expands_from_waiting_candidate_perspective(self):
+        """비대칭 range 버그 회귀 테스트 — 오래 기다려 range가 넓어진 쪽이 후보(2번)이고,
+        방금 큐에 들어온 나(1번)의 range는 아직 base_range(50)뿐이어도, 둘 중 더 관대한
+        쪽(후보의 range)을 적용받아 매칭돼야 한다. 이 대칭 처리가 없으면 diff(120)가
+        내 range(50)만으로는 안 잡혀서 "매칭이 안 되는" 버그가 재현된다."""
+        self._join(2, 220, queued_ago_ms=self.EXPAND_INTERVAL_MS * 2)  # range: 50+100=150
+        self._join(1, 100)  # 방금 큐에 들어옴 — 자기 range는 50뿐
+
+        result, detail = self._try_match(1)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(detail, "2")
+
 
 class GameEndLockTests(SimpleTestCase):
     """게임 종료 동시 트리거 방지(§6) — 같은 방에 대해 game_end_lock 획득 요청을
@@ -393,7 +406,7 @@ class GameConsumerIntegrationTests(TransactionTestCase):
 
             for spawn in (spawn1, spawn2):
                 if spawn["text"] == self.correct_text:
-                    self.assertIn(spawn["item"], ("alert", "ink"))
+                    self.assertIn(spawn["item"], ("alert", "honey"))
                     correct_code_id = spawn["code_id"]
                 else:
                     self.assertIsNone(spawn["item"])
@@ -403,7 +416,7 @@ class GameConsumerIntegrationTests(TransactionTestCase):
             )
             result1 = await comm1.receive_json_from(timeout=2)
             self.assertEqual(result1["code_id"], correct_code_id)
-            self.assertIn(result1["item"], ("alert", "ink"))
+            self.assertIn(result1["item"], ("alert", "honey"))
 
             await comm2.receive_json_from(timeout=2)  # comm2도 동일한 code.result를 받음(큐 비움)
 
@@ -455,6 +468,13 @@ class MatchmakingConsumerIntegrationTests(TransactionTestCase):
         self.assertEqual(found1["type"], "match.found")
         self.assertEqual(found2["type"], "match.found")
         self.assertEqual(found1["code"], found2["code"])
+
+        # 대기 화면에 상대 티어를 보여주기 위한 필드 — 둘 다 기본 iron/0 프로필이라
+        # 서로에게 상대의(자기 자신이 아닌) 티어가 내려와야 한다
+        self.assertEqual(found1["opponent_tier"], "iron")
+        self.assertEqual(found1["opponent_tier_score"], 0)
+        self.assertEqual(found2["opponent_tier"], "iron")
+        self.assertEqual(found2["opponent_tier_score"], 0)
 
         room = await self._get_room(found1["code"])
         self.assertTrue(room.is_ranked)

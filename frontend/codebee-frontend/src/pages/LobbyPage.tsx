@@ -10,6 +10,8 @@ import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
 import MatchmakingModal from '../components/MatchmakingModal';
 import PromotionBanner from '../components/PromotionBanner';
+import SettingsIcon from '../components/SettingsIcon';
+import SettingsModal from '../components/SettingsModal';
 import TierBadge from '../components/TierBadge';
 import PracticeMode from '../components/PracticeMode';
 import { useAuthStore } from '../store/authStore';
@@ -17,7 +19,7 @@ import { DIFFICULTY_LABEL } from '../lib/gameConstants';
 import type { Difficulty } from '../lib/gameConstants';
 import { ratingToTier, TIERS } from '../lib/tier';
 import type { Tier } from '../lib/tier';
-import { playCorrect, playTypo, playWrong, startGameBgm, startLobbyBgm } from '../lib/sound';
+import { playCorrect, playCountdownBeep, playTypo, playWrong, startGameBgm, startLobbyBgm, stopBgm } from '../lib/sound';
 import type {
   ActiveItemEffect,
   FallingCode,
@@ -45,9 +47,9 @@ const WS_ERROR_LABEL: Record<string, string> = {
   room_not_finished: '게임이 끝난 뒤에만 재대결할 수 있습니다.',
 };
 
-// 방해 아이템(alert/ink) 지속시간 — 순수 연출값이라 프론트 상수로 관리한다
+// 방해 아이템(alert/honey) 지속시간 — 순수 연출값이라 프론트 상수로 관리한다
 // (docs/plan/game-items.md §7). 중첩 시 지속시간을 연장하지 않고 겹쳐서 쌓인다.
-const INK_EFFECT_MS = 3000;
+const HONEY_EFFECT_MS = 3000;
 const ALERT_EFFECT_MS = 3000;
 
 function LobbyPage() {
@@ -61,6 +63,7 @@ function LobbyPage() {
   const [busy, setBusy] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [showRules, setShowRules] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   // 게임 시작 전 3초 카운트다운 — 서버 game.starting을 받으면 초 단위로 세팅되고
   // 1초마다 줄어든다. null이면 카운트다운 중이 아님(대기실 기본 상태).
@@ -69,6 +72,9 @@ function LobbyPage() {
   const [practiceActive, setPracticeActive] = useState(false);
   // 친선전 패널 안에서 방 만들기/방 참가하기를 전환하는 탭
   const [friendlyTab, setFriendlyTab] = useState<'create' | 'join'>('create');
+  // 방 만들기/참가하기 관련 에러(방 코드 미입력, 존재하지 않는 방 등)는 화면
+  // 하단 공용 error가 아니라 친선전 패널 안에서만 보여준다.
+  const [friendlyError, setFriendlyError] = useState<string | null>(null);
   // 이 방이 매칭으로 성사된 방인지 — 백엔드가 room 응답에 is_ranked를 안 내려주므로
   // (docs/plan/architecture.md 갭) handleMatchFound를 거쳤는지로 프론트에서만 추적한다.
   // true면 대기실 화면(방 코드/복사/난이도 선택) 대신 "매칭 완료" 화면을 보여주고,
@@ -84,6 +90,9 @@ function LobbyPage() {
   // 의존하기 때문).
   const preMatchRatingRef = useRef<number | null>(null);
   const [tierDelta, setTierDelta] = useState<number | null>(null);
+  // 랭킹전 대기 화면에서 상대 티어를 보여주기 위한 값 — match.found가 내려주는
+  // opponent_tier/opponent_tier_score를 그대로 담아둔다.
+  const [opponentTierInfo, setOpponentTierInfo] = useState<{ tier: Tier; tierScore: number } | null>(null);
   // 이번 판으로 티어 등급 자체가 올랐을 때만 채워짐 — 승급 연출(PromotionBanner)
   // 트리거용. 점수만 오르내린 경우(등급은 그대로)엔 null로 두고 tierDelta 텍스트만 보여준다.
   const [promotion, setPromotion] = useState<{ from: Tier; to: Tier } | null>(null);
@@ -103,7 +112,7 @@ function LobbyPage() {
   const [myLeaderboardRank, setMyLeaderboardRank] = useState<LeaderboardEntry | null>(null);
   const [worst, setWorst] = useState<WorstEntry[]>([]);
   const [scorePops, setScorePops] = useState<ScorePop[]>([]);
-  const [inkEffects, setInkEffects] = useState<ActiveItemEffect[]>([]);
+  const [honeyEffects, setHoneyEffects] = useState<ActiveItemEffect[]>([]);
   const [alerts, setAlerts] = useState<ActiveItemEffect[]>([]);
 
   const pollTimer = useRef<number | null>(null);
@@ -177,15 +186,26 @@ function LobbyPage() {
   // BGM 전환 — 연습모드가 활성화된 동안은 PracticeMode가 자체적으로 BGM을
   // 관리하므로 여기서는 관여하지 않는다(둘 다 동시에 startXxxBgm을 부르면
   // 충돌할 수 있음). practiceActive가 꺼지는 순간 이 effect가 다시 돌아 정상
-  // 복귀한다.
+  // 복귀한다. 3,2,1 카운트다운 중에는(랭킹전/친선전 공통) bgm을 끄고 카운트다운
+  // 비프음만 들리게 한다 — 카운트다운이 취소돼서 null로 돌아와도(상대가 나가는
+  // 등) room.status는 여전히 waiting이라 이 effect가 그대로 로비 bgm을 복구해준다.
   useEffect(() => {
     if (practiceActive) return;
-    if (room?.status === 'playing') {
+    if (pregameCountdown !== null) {
+      stopBgm();
+    } else if (room?.status === 'playing') {
       startGameBgm();
     } else {
       startLobbyBgm();
     }
-  }, [room?.status, practiceActive]);
+  }, [room?.status, practiceActive, pregameCountdown]);
+
+  // 카운트다운 숫자가 바뀔 때마다(3→2→1) 비프음 — 0으로 내려가는 순간은 위
+  // 티킹 effect가 곧바로 null로 바꿔버려서 화면에 보이지 않으므로 여기서도 건너뛴다.
+  useEffect(() => {
+    if (pregameCountdown === null || pregameCountdown <= 0) return;
+    playCountdownBeep(pregameCountdown);
+  }, [pregameCountdown]);
 
   useEffect(() => {
     if (!showRules) return;
@@ -274,7 +294,7 @@ function LobbyPage() {
           setPregameCountdown(null);
           setTierDelta(null);
           setPromotion(null);
-          setInkEffects([]);
+          setHoneyEffects([]);
           setAlerts([]);
 
           // 랭킹전은 대기실이 노출되지 않으므로(§LobbyPage 위쪽 주석) 상대가
@@ -300,7 +320,7 @@ function LobbyPage() {
         setScores({});
         setGameOver(null);
         setPregameCountdown(null);
-        setInkEffects([]);
+        setHoneyEffects([]);
         setAlerts([]);
         break;
       }
@@ -351,11 +371,11 @@ function LobbyPage() {
         const item = data.item as ItemType | null | undefined;
         if (item && correct && userId !== myUserId) {
           const effectId = `${codeId}-${Date.now()}`;
-          if (item === 'ink') {
-            setInkEffects((prev) => [...prev, { id: effectId, type: 'ink', spawnedAt: Date.now() }]);
+          if (item === 'honey') {
+            setHoneyEffects((prev) => [...prev, { id: effectId, type: 'honey', spawnedAt: Date.now() }]);
             window.setTimeout(() => {
-              setInkEffects((prev) => prev.filter((e) => e.id !== effectId));
-            }, INK_EFFECT_MS);
+              setHoneyEffects((prev) => prev.filter((e) => e.id !== effectId));
+            }, HONEY_EFFECT_MS);
           } else if (item === 'alert') {
             setAlerts((prev) => [...prev, { id: effectId, type: 'alert', spawnedAt: Date.now() }]);
             window.setTimeout(() => {
@@ -454,13 +474,13 @@ function LobbyPage() {
   }
 
   async function handleCreateRoom() {
-    setError(null);
+    setFriendlyError(null);
     setBusy(true);
     try {
       const created = await createRoom();
       setRoom(created);
     } catch (err) {
-      setError(getErrorMessage(err));
+      setFriendlyError(getErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -469,16 +489,16 @@ function LobbyPage() {
   async function handleJoinRoom(event: SubmitEvent) {
     event.preventDefault();
     if (!joinCode.trim()) {
-      setError('참가할 방 코드를 입력해주세요.');
+      setFriendlyError('참가할 방 코드를 입력해주세요.');
       return;
     }
-    setError(null);
+    setFriendlyError(null);
     setBusy(true);
     try {
       const joined = await joinRoom(joinCode.trim());
       setRoom(joined);
     } catch (err) {
-      setError(getErrorMessage(err));
+      setFriendlyError(getErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -488,11 +508,14 @@ function LobbyPage() {
     sendMessage({ type: 'game.start', difficulty });
   }
 
-  async function handleMatchFound(code: string) {
+  async function handleMatchFound(code: string, opponentTier: Tier | null, opponentTierScore: number | null) {
     setShowMatchmaking(false);
     setError(null);
     setIsRankedMatch(true);
     isRankedMatchRef.current = true;
+    setOpponentTierInfo(
+      opponentTier !== null && opponentTierScore !== null ? { tier: opponentTier, tierScore: opponentTierScore } : null,
+    );
 
     // 결산 화면에서 티어 변동을 보여주기 위해 매칭 성사 시점의 레이팅을 스냅샷.
     try {
@@ -544,6 +567,7 @@ function LobbyPage() {
     wsRef.current?.close();
     setRoom(null);
     setError(null);
+    setFriendlyError(null);
     setFallingCodes([]);
     setScores({});
     setScorePops([]);
@@ -556,6 +580,7 @@ function LobbyPage() {
     setTierDelta(null);
     setPromotion(null);
     setIsRankedMatch(false);
+    setOpponentTierInfo(null);
     isRankedMatchRef.current = false;
     preMatchRatingRef.current = null;
     clockBestRttRef.current = Infinity;
@@ -612,14 +637,17 @@ function LobbyPage() {
         <Logo />
         {room?.status !== 'playing' && !practiceActive && (
           <div className="lobby-header-user">
-            <button type="button" className="btn-link" onClick={() => setShowRules(true)}>
-              게임 규칙
+            <button
+              type="button"
+              className="btn-link btn-icon"
+              onClick={() => setShowSettings(true)}
+              aria-label="설정"
+              title="설정"
+            >
+              <SettingsIcon />
             </button>
             <TierBadge tier={myTier?.tier} tierScore={myTier?.tier_score} />
             <span>{user?.username}님 환영합니다</span>
-            <button type="button" className="btn-link" onClick={handleLogout}>
-              로그아웃
-            </button>
           </div>
         )}
       </header>
@@ -659,6 +687,14 @@ function LobbyPage() {
         </div>
       )}
 
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onShowRules={() => setShowRules(true)}
+          onLogout={handleLogout}
+        />
+      )}
+
       {!room && !practiceActive && (
         <div className="lobby-content">
           <div className="lobby-modes">
@@ -676,18 +712,26 @@ function LobbyPage() {
                 <button
                   type="button"
                   className={`friendly-tab-btn ${friendlyTab === 'create' ? 'selected' : ''}`}
-                  onClick={() => setFriendlyTab('create')}
+                  onClick={() => {
+                    setFriendlyTab('create');
+                    setFriendlyError(null);
+                  }}
                 >
                   방 만들기
                 </button>
                 <button
                   type="button"
                   className={`friendly-tab-btn ${friendlyTab === 'join' ? 'selected' : ''}`}
-                  onClick={() => setFriendlyTab('join')}
+                  onClick={() => {
+                    setFriendlyTab('join');
+                    setFriendlyError(null);
+                  }}
                 >
                   방 참가하기
                 </button>
               </div>
+
+              {friendlyError && <p className="field-error">{friendlyError}</p>}
 
               {friendlyTab === 'create' ? (
                 <>
@@ -761,6 +805,7 @@ function LobbyPage() {
             <div className="player-slot filled">
               <span className="player-role">상대</span>
               <span className="player-name">{opponentUsername}</span>
+              <TierBadge tier={opponentTierInfo?.tier} tierScore={opponentTierInfo?.tierScore} compact />
             </div>
           </div>
 
@@ -843,7 +888,7 @@ function LobbyPage() {
           duration={gameDuration}
           clockOffset={clockOffset}
           feedback={feedback}
-          inkEffects={inkEffects}
+          honeyEffects={honeyEffects}
           alerts={alerts}
           onDismissAlert={dismissAlert}
           onSubmit={handleGameSubmit}

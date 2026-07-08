@@ -20,9 +20,9 @@ from .snippet_cache import clear_snippet_pool, get_snippet_pool
 GAME_DURATION_MS = 60000
 SCORE_DELTA_INCORRECT = -500
 
-# 방해 아이템(alert/ink) — 정답 스니펫에만 붙고, 확률은 QA 조정용으로 .env에서
+# 방해 아이템(alert/honey) — 정답 스니펫에만 붙고, 확률은 QA 조정용으로 .env에서
 # 읽는다(ITEM_ATTACH_PROB, config/settings.py). docs/plan/game-items.md 참고.
-ITEM_TYPES = ("alert", "ink")
+ITEM_TYPES = ("alert", "honey")
 
 # 게임 시작 전 카운트다운 — 프론트 3초 연출과 서버 스폰/타이머 가동 시점을
 # 맞춰서, 카운트다운 중에 코드가 미리 낙하해버리는 것을 막는다.

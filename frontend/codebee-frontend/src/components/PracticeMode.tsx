@@ -291,7 +291,7 @@ function PracticeMode({ myUsername, onExit }: PracticeModeProps) {
       clockOffset={0}
       feedback={feedback}
       // 연습모드는 상대가 없어 방해 아이템이 발동될 일이 없다 — 항상 빈 상태로 고정.
-      inkEffects={EMPTY_ITEM_EFFECTS}
+      honeyEffects={EMPTY_ITEM_EFFECTS}
       alerts={EMPTY_ITEM_EFFECTS}
       onDismissAlert={() => {}}
       onSubmit={handleSubmit}

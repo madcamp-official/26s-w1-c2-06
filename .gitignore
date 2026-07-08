@@ -42,3 +42,7 @@ backend/.env
 
 .claude
 .gstack/
+
+### 정답/오답 시드 데이터 (코드id 매핑 공격 방지 — 공개되면 정답 목록이 노출됨) ###
+backend/game/management/commands/seed_snippets.py
+backend/game/management/commands/seed_snippets_2.py

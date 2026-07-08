@@ -55,6 +55,9 @@ DIFFICULTY_PRESETS = {
     "easy": {"spawn_tick_ms": 800, "fall_speed_mult": 1.4},
     "normal": {"spawn_tick_ms": 500, "fall_speed_mult": 1.0},
     "hard": {"spawn_tick_ms": 320, "fall_speed_mult": 0.7},
+    # 랭킹전 전용 — 친선전 난이도 선택과 무관하게 항상 이 프리셋을 쓴다(§_handle_game_start).
+    # 스폰 주기는 '보통'과 동일하게 두고 낙하 속도만 70%로 줄인다(즉 낙하 시간은 1/0.7배).
+    "ranked": {"spawn_tick_ms": 500, "fall_speed_mult": round(1 / 0.7, 2)},
 }
 DEFAULT_DIFFICULTY = "normal"
 
@@ -124,6 +127,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._handle_submit(data)
         elif msg_type == "rematch":
             await self._handle_rematch()
+        elif msg_type == "forfeit":
+            await self._handle_forfeit()
 
     # --- 클럭 동기화 (§9, stateless — 상태 저장 없이 즉시 응답만) ---
 
@@ -189,9 +194,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._send_json({"type": "error", "error": "room_not_waiting"})
             return
 
-        difficulty = data.get("difficulty")
-        if difficulty not in DIFFICULTY_PRESETS:
-            difficulty = DEFAULT_DIFFICULTY
+        # 랭킹전은 친선전의 난이도 선택 UI 자체가 없으므로(클라이언트가 뭘 보내든)
+        # 항상 전용 프리셋을 강제한다 — 매칭으로 실력차가 이미 좁혀진 상태라 낙하
+        # 속도를 늦춰 판정 실수(오탈자)의 비중을 줄이기 위함.
+        if room.is_ranked:
+            difficulty = "ranked"
+        else:
+            difficulty = data.get("difficulty")
+            if difficulty not in DIFFICULTY_PRESETS:
+                difficulty = DEFAULT_DIFFICULTY
 
         r = get_redis()
         acquired = await r.set(f"game_starting_lock:{self.room_code}", 1, nx=True, ex=10)
@@ -261,6 +272,17 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _reset_room_to_waiting(self):
         Room.objects.filter(code=self.room_code).update(status="waiting", started_at=None, ended_at=None)
+
+    # --- 게임 포기 (플레이어가 직접 트리거, disconnect()의 강제 종료와 달리
+    #     소켓을 열어둔 채 보내므로 포기한 본인도 game.over를 정상적으로 받는다) ---
+
+    async def _handle_forfeit(self):
+        room = await self._get_room()
+        if room is None or room.status != "playing":
+            return
+
+        opponent_id = room.player2_id if room.player1_id == self.user.id else room.player1_id
+        await self._try_end_game(forced_winner_id=opponent_id)
 
     # --- 스폰 틱 로직 (§4, "스폰도 선점 문제") ---
 

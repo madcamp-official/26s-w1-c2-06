@@ -1,0 +1,26 @@
+.sound-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 9998;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid var(--text-h);
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 16px;
+  line-height: 1;
+  cursor: inherit;
+  box-shadow: 2px 2px 0 var(--text-h);
+}
+
+.sound-toggle:hover {
+  filter: brightness(1.15);
+}
+
+.sound-toggle:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 var(--text-h);
+}

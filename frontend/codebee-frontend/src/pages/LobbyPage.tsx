@@ -17,6 +17,7 @@ import { DIFFICULTY_LABEL } from '../lib/gameConstants';
 import type { Difficulty } from '../lib/gameConstants';
 import { ratingToTier, TIERS } from '../lib/tier';
 import type { Tier } from '../lib/tier';
+import { playCorrect, playTypo, playWrong, startGameBgm, startLobbyBgm } from '../lib/sound';
 import type {
   ActiveItemEffect,
   FallingCode,
@@ -173,6 +174,19 @@ function LobbyPage() {
       .catch(() => {});
   }, [showMatchmaking]);
 
+  // BGM 전환 — 연습모드가 활성화된 동안은 PracticeMode가 자체적으로 BGM을
+  // 관리하므로 여기서는 관여하지 않는다(둘 다 동시에 startXxxBgm을 부르면
+  // 충돌할 수 있음). practiceActive가 꺼지는 순간 이 effect가 다시 돌아 정상
+  // 복귀한다.
+  useEffect(() => {
+    if (practiceActive) return;
+    if (room?.status === 'playing') {
+      startGameBgm();
+    } else {
+      startLobbyBgm();
+    }
+  }, [room?.status, practiceActive]);
+
   useEffect(() => {
     if (!showRules) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -204,6 +218,10 @@ function LobbyPage() {
   // feedback을 null로 한 번 거쳤다가 다시 세팅한다 — 연속으로 같은 값(예: 연타 miss)이
   // 와도 CSS 애니메이션(흔들림 등)이 리액트 리렌더로 인해 재생되지 않는 문제를 막는다.
   const pulseFeedback = useCallback((next: 'correct' | 'incorrect' | 'miss') => {
+    if (next === 'correct') playCorrect();
+    else if (next === 'incorrect') playWrong();
+    else playTypo();
+
     setFeedback(null);
     requestAnimationFrame(() => {
       setFeedback(next);
@@ -513,6 +531,15 @@ function LobbyPage() {
     sendMessage({ type: 'rematch' });
   }
 
+  // 포기 시 소켓을 바로 닫지 않는다 — 그대로 닫으면(handleLeaveRoom) 서버가
+  // disconnect()로 강제 종료 처리를 하긴 하지만, 정작 포기한 본인은 이미 소켓을
+  // 끊어서 그 game.over 브로드캐스트를 못 받는다(결산화면 미표시, 티어/리더보드
+  // 미갱신). 소켓을 열어둔 채 forfeit만 보내면 서버가 game.over를 쏴주고, 평소와
+  // 같은 game.over 처리 경로(결산화면, 티어 변동, 리더보드 갱신)를 그대로 탄다.
+  function handleForfeit() {
+    sendMessage({ type: 'forfeit' });
+  }
+
   function handleLeaveRoom() {
     wsRef.current?.close();
     setRoom(null);
@@ -820,7 +847,7 @@ function LobbyPage() {
           alerts={alerts}
           onDismissAlert={dismissAlert}
           onSubmit={handleGameSubmit}
-          onForfeit={handleLeaveRoom}
+          onForfeit={handleForfeit}
         />
       )}
 

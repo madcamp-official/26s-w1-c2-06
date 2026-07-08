@@ -89,13 +89,26 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
             return False
 
         partner_id = int(detail)
-        room = await self._create_ranked_room(partner_id)
+        # Lua 스크립트가 이미 두 유저를 큐에서 원자적으로 제거했다 — 매칭은 이 시점에
+        # 되돌릴 수 없는 기정 사실이므로, 방 생성+양쪽 통보는 poll_task 실행 트리에서
+        # 분리된 별도 태스크로 돌린다. 여기서 그대로 await하면, self에게 보내는
+        # group_send가 채널 레이어를 왕복해 같은 이벤트루프의 match_found() 핸들러로
+        # 곧장 디스패치될 수 있고, 그 핸들러가 poll_task.cancel()을 호출하는 순간
+        # 마침 partner에게 보낼 두 번째 group_send를 기다리는 중이었다면
+        # CancelledError로 끊겨 partner가 영원히 통보를 못 받고 매칭 중 화면에
+        # 갇힌다(disconnect()로 poll_task가 취소되는 경로도 동일한 문제). 이 함수의
+        # 실행 흐름 밖에 두면 poll_task가 어느 쪽으로 취소되든 finalize는 영향받지
+        # 않는다. self._finalize_task로 참조를 들고 있어야 GC가 완료 전에 태스크를
+        # 거둬가지 않는다.
+        self._finalize_task = asyncio.create_task(self._finalize_match(partner_id))
+        return True
 
+    async def _finalize_match(self, partner_id):
+        room = await self._create_ranked_room(partner_id)
         for user_id in (self.user.id, partner_id):
             await self.channel_layer.group_send(
                 f"mm_user_{user_id}", {"type": "match.found", "code": room.code}
             )
-        return True
 
     async def _leave_queue(self):
         r = get_redis()

@@ -9,11 +9,14 @@ import GameScreen, { RESOLVE_ANIM_MS } from '../components/GameScreen';
 import Leaderboard from '../components/Leaderboard';
 import Logo from '../components/Logo';
 import MatchmakingModal from '../components/MatchmakingModal';
+import PromotionBanner from '../components/PromotionBanner';
 import TierBadge from '../components/TierBadge';
 import PracticeMode from '../components/PracticeMode';
 import { useAuthStore } from '../store/authStore';
 import { DIFFICULTY_LABEL } from '../lib/gameConstants';
 import type { Difficulty } from '../lib/gameConstants';
+import { ratingToTier, TIERS } from '../lib/tier';
+import type { Tier } from '../lib/tier';
 import type {
   ActiveItemEffect,
   FallingCode,
@@ -80,6 +83,9 @@ function LobbyPage() {
   // 의존하기 때문).
   const preMatchRatingRef = useRef<number | null>(null);
   const [tierDelta, setTierDelta] = useState<number | null>(null);
+  // 이번 판으로 티어 등급 자체가 올랐을 때만 채워짐 — 승급 연출(PromotionBanner)
+  // 트리거용. 점수만 오르내린 경우(등급은 그대로)엔 null로 두고 tierDelta 텍스트만 보여준다.
+  const [promotion, setPromotion] = useState<{ from: Tier; to: Tier } | null>(null);
   // 헤더에 상시 표시할 내 티어 — GET /api/me/tier/ 결과. 매칭 전/후, 랭크전 종료
   // 후에 갱신된다.
   const [myTier, setMyTier] = useState<TierInfo | null>(null);
@@ -158,6 +164,15 @@ function LobbyPage() {
       });
   }, []);
 
+  // 매칭 모달이 fresh하게 새로 조회하는 티어와 헤더 배지가 다르게 보이는 걸
+  // 막기 위해, 매칭을 시작하는 시점에 헤더 값도 같이 최신화한다.
+  useEffect(() => {
+    if (!showMatchmaking) return;
+    getMyTier()
+      .then(setMyTier)
+      .catch(() => {});
+  }, [showMatchmaking]);
+
   useEffect(() => {
     if (!showRules) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -216,13 +231,15 @@ function LobbyPage() {
       }
       case 'room.update': {
         const nextStatus = data.status as Room['status'];
+        const nextPlayer1 = data.player1 as string | null;
+        const nextPlayer2 = data.player2 as string | null;
         setRoom((prev) =>
           prev
             ? {
                 ...prev,
                 status: nextStatus,
-                player1: data.player1 as string | null,
-                player2: data.player2 as string | null,
+                player1: nextPlayer1,
+                player2: nextPlayer2,
               }
             : prev,
         );
@@ -238,8 +255,17 @@ function LobbyPage() {
           // 카운트다운 도중 상대가 나가는 등으로 시작이 취소된 경우도 여기로 옴
           setPregameCountdown(null);
           setTierDelta(null);
+          setPromotion(null);
           setInkEffects([]);
           setAlerts([]);
+
+          // 랭킹전은 대기실이 노출되지 않으므로(§LobbyPage 위쪽 주석) 상대가
+          // 게임 시작 전에 나가면 방에 혼자 남아 멈춰있게 된다 — 나도 방을 나가고
+          // 곧바로 다시 매칭 큐에 들어가게 한다.
+          if (isRankedMatchRef.current && (!nextPlayer1 || !nextPlayer2)) {
+            handleLeaveRoom();
+            setShowMatchmaking(true);
+          }
         }
         break;
       }
@@ -348,6 +374,13 @@ function LobbyPage() {
             .then((info) => {
               setMyTier(info);
               setTierDelta(info.rating - before);
+
+              const beforeTier = ratingToTier(before).tier;
+              setPromotion(
+                TIERS.indexOf(info.tier) > TIERS.indexOf(beforeTier)
+                  ? { from: beforeTier, to: info.tier }
+                  : null,
+              );
             })
             .catch(() => {});
         }
@@ -494,6 +527,7 @@ function LobbyPage() {
     setClockOffset(0);
     setPregameCountdown(null);
     setTierDelta(null);
+    setPromotion(null);
     setIsRankedMatch(false);
     isRankedMatchRef.current = false;
     preMatchRatingRef.current = null;
@@ -806,6 +840,9 @@ function LobbyPage() {
                   ? 'DRAW'
                   : 'GAME OVER'}
           </div>
+
+          {promotion && <PromotionBanner from={promotion.from} to={promotion.to} />}
+
           <p className="room-hint">
             {resultOutcome === 'draw'
               ? '무승부입니다.'
@@ -815,7 +852,7 @@ function LobbyPage() {
                   ? '패배했습니다.'
                   : '게임이 종료되었습니다.'}
           </p>
-          {tierDelta !== null && (
+          {tierDelta !== null && !promotion && (
             <p className={`tier-delta-line ${tierDelta > 0 ? 'positive' : 'negative'}`}>
               티어 점수 {tierDelta > 0 ? `+${tierDelta}` : tierDelta}
             </p>
@@ -833,20 +870,16 @@ function LobbyPage() {
             </div>
           </div>
 
-          <Leaderboard
-            entries={leaderboard}
-            me={myLeaderboardRank}
-            myUsername={user?.username ?? null}
-            worst={worst}
-          />
-
-          {youAreHost ? (
-            <button type="button" className="btn-primary" onClick={handleRematch}>
-              재대결
-            </button>
-          ) : (
-            <p className="room-hint">방장이 재대결을 시작하면 자동으로 전환됩니다.</p>
-          )}
+          {/* 랭킹전은 매칭으로 성사된 일회성 대전이라 재대결 개념이 없다 —
+              방을 나가면 §room.update 핸들러가 자동으로 다시 매칭을 걸어준다. */}
+          {!isRankedMatch &&
+            (youAreHost ? (
+              <button type="button" className="btn-primary" onClick={handleRematch}>
+                재대결
+              </button>
+            ) : (
+              <p className="room-hint">방장이 재대결을 시작하면 자동으로 전환됩니다.</p>
+            ))}
           <button type="button" className="btn-link" onClick={handleLeaveRoom}>
             로비로 돌아가기
           </button>

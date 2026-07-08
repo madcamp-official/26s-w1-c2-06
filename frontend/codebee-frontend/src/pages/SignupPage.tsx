@@ -37,10 +37,11 @@ function SignupPage() {
         <h1 className="auth-title">회원가입</h1>
 
         <label className="field">
-          <span>아이디</span>
+          <span>아이디 (영문/숫자, 15자 이내)</span>
           <input
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => setUsername(e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 15))}
+            maxLength={15}
             autoComplete="username"
             autoFocus
           />

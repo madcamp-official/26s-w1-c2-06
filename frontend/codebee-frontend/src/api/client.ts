@@ -58,6 +58,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 const ERROR_MESSAGES: Record<string, string> = {
   duplicate_username: '이미 사용 중인 아이디입니다.',
   username_password_required: '아이디와 비밀번호를 모두 입력해주세요.',
+  invalid_username_format: '아이디는 영문/숫자 15자 이내여야 합니다.',
   invalid_password_format: '비밀번호는 0000~9999 사이의 네 자리 숫자여야 합니다.',
   invalid_credentials: '아이디 또는 비밀번호가 올바르지 않습니다.',
   not_authenticated: '로그인이 필요합니다.',

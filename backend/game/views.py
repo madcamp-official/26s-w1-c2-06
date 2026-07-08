@@ -29,6 +29,9 @@ def signup(request):
     if not username or not password:
         return JsonResponse({"error": "username_password_required"}, status=400)
 
+    if not re.fullmatch(r"[A-Za-z0-9]{1,15}", username):
+        return JsonResponse({"error": "invalid_username_format"}, status=400)
+
     # 비밀번호는 로그인 화면의 슬라이더(0000~9999)와 형식을 맞춰야 한다 — 자유
     # 텍스트를 허용하면 슬라이더로는 재현할 수 없는 비밀번호가 만들어져 로그인이
     # 원천적으로 불가능해진다.

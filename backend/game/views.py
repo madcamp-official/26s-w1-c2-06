@@ -7,7 +7,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
 from . import tier
-from .models import CodeSnippet, Profile, Room
+from .models import CodeSnippet, GameResult, Profile, Room
 from .room_codes import generate_room_code
 
 User = get_user_model()
@@ -177,8 +177,16 @@ def leaderboard(request):
         return JsonResponse({"error": "not_authenticated"}, status=401)
 
     # 랭킹은 티어 점수(rating) 기준 — 실제로 한 판 이상 플레이한 유저만 대상으로
-    # 한다(total_score>0을 "플레이 이력 있음"의 프록시로 사용).
-    played = list(Profile.objects.select_related("user").filter(total_score__gt=0))
+    # 한다. "플레이 이력 있음"은 total_score(역대 최고 점수)로 판단하면 안 된다 —
+    # 티어 승급/강등은 점수 절댓값이 아니라 승패로만 결정되므로, 매 판 최종
+    # 점수가 0 이하였던 유저는 계속 이겨서 티어가 올라도 total_score가 0에
+    # 머물러 필터에서 통째로 빠져버린다(전체 랭킹은 물론 하위권 목록에서도
+    # 사라지는 버그). GameResult에 실제로 참여했는지로 판단해야 정확하다.
+    played_user_ids = set()
+    for u1, u2 in GameResult.objects.values_list("user1_id", "user2_id"):
+        played_user_ids.add(u1)
+        played_user_ids.add(u2)
+    played = list(Profile.objects.select_related("user").filter(user_id__in=played_user_ids))
     for p in played:
         p.rating_value = tier.rating(p.tier, p.tier_score)
 

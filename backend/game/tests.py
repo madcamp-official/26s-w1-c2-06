@@ -369,6 +369,11 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         self.assertEqual(spawn1["type"], "code.spawn")
         self.assertEqual(spawn1["code_id"], spawn2["code_id"])
         self.assertEqual(spawn1["text"], spawn2["text"])
+        # code_id가 CodeSnippet의 DB PK로 새어나가면 안 된다 — PK가 노출되면 시드
+        # 데이터(seed_snippets*.py, git에 공개됨)만으로 정답 여부를 미리 알 수 있는
+        # 치트가 가능해진다.
+        spawned_snippet = await database_sync_to_async(CodeSnippet.objects.get)(text=spawn1["text"])
+        self.assertNotEqual(spawn1["code_id"], str(spawned_snippet.id))
 
         # user1이 스폰된 텍스트를 그대로 제출 → 판정 결과가 양쪽에 동일하게 브로드캐스트
         await comm1.send_to(text_data=json.dumps({"type": "code.submit", "text": spawn1["text"]}))

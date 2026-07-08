@@ -55,6 +55,11 @@ class GameResult(models.Model):
 
 
 class CodeSnippet(models.Model):
+    POOL_CHOICES = [("match", "실전(친선전/랭킹전)"), ("practice", "연습")]
+
     text = models.CharField(max_length=255, unique=True)
     is_correct = models.BooleanField()
+    # 연습모드에서 반복 노출되면 실전 스니펫을 그대로 암기하게 되는 문제를 막기 위해
+    # 실전(match)과 연습(practice) 풀을 물리적으로 분리한다.
+    pool = models.CharField(max_length=10, choices=POOL_CHOICES, default="match")
     created_at = models.DateTimeField(auto_now_add=True)

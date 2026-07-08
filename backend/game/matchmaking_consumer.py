@@ -7,6 +7,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
 from . import tier
+from .consumers import _origin_allowed
 from .matchmaking_scripts import get_match_script
 from .models import Profile, Room
 from .redis_client import get_redis
@@ -30,6 +31,10 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope["user"]
         if not self.user.is_authenticated:
+            await self.close()
+            return
+
+        if not _origin_allowed(self.scope):
             await self.close()
             return
 

@@ -11,7 +11,7 @@ from .redis_client import get_redis
 # codes:{room}의 값은 "text\\x01is_correct\\x01spawn_ts\\x01duration_ms\\x01item" 형태로
 # 패킹된다(consumers.py의 PACK_SEP 참고) — "|" 대신 \\x01(제어문자)을 구분자로 쓰는 이유는
 # 코드 텍스트 자체에 "|"가 나올 수 있어서다(예: `Optional[int] | None`, 셸 파이프 등).
-# item은 방해 아이템(alert/ink) 종류 또는 빈 문자열(없음) — 정답 스니펫에만 붙는다
+# item은 방해 아이템(alert/honey) 종류 또는 빈 문자열(없음) — 정답 스니펫에만 붙는다
 # (docs/plan/game-items.md).
 #
 # spawn_ts/duration_ms을 함께 저장해두는 이유: 프론트에서 이미 화면 밖으로 떨어져

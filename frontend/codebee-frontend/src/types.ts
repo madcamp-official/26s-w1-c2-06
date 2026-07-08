@@ -24,7 +24,7 @@ export interface Room {
 
 // 상대방을 방해하는 아이템 — 서버가 스폰 시점에 결정해서 정답 코드에만 붙인다
 // (docs/plan/game-items.md)
-export type ItemType = 'alert' | 'ink';
+export type ItemType = 'alert' | 'honey';
 
 export interface FallingCode {
   codeId: string;
@@ -35,7 +35,7 @@ export interface FallingCode {
   resolution?: { correct: boolean; userId: number } | null; // 판정 후 날아가는 연출용, 판정 전엔 없음
 }
 
-// 발동된 아이템 효과 — ink/alert 둘 다 중첩(겹쳐 쌓임) 방식이라 배열로 관리
+// 발동된 아이템 효과 — honey/alert 둘 다 중첩(겹쳐 쌓임) 방식이라 배열로 관리
 export interface ActiveItemEffect {
   id: string;
   type: ItemType;

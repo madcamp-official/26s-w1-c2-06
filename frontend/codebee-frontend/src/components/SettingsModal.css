@@ -1,0 +1,44 @@
+.settings-modal {
+  max-width: 360px;
+}
+
+.sound-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.sound-settings-label {
+  width: 72px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-h);
+}
+
+.sound-settings-slider {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: inherit;
+}
+
+.sound-settings-value {
+  width: 3.5ch;
+  flex-shrink: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 2px dashed var(--border);
+}
+
+.settings-actions .btn-link {
+  flex: 1;
+}

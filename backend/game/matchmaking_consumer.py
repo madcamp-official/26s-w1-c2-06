@@ -105,9 +105,18 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
 
     async def _finalize_match(self, partner_id):
         room = await self._create_ranked_room(partner_id)
+        tiers = await self._get_tiers(self.user.id, partner_id)
         for user_id in (self.user.id, partner_id):
+            opponent_id = partner_id if user_id == self.user.id else self.user.id
+            opponent = tiers.get(opponent_id, {})
             await self.channel_layer.group_send(
-                f"mm_user_{user_id}", {"type": "match.found", "code": room.code}
+                f"mm_user_{user_id}",
+                {
+                    "type": "match.found",
+                    "code": room.code,
+                    "opponent_tier": opponent.get("tier"),
+                    "opponent_tier_score": opponent.get("tier_score"),
+                },
             )
 
     async def _leave_queue(self):
@@ -124,7 +133,12 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
             with contextlib.suppress(asyncio.CancelledError):
                 await poll_task
 
-        await self._send_json({"type": "match.found", "code": event["code"]})
+        await self._send_json({
+            "type": "match.found",
+            "code": event["code"],
+            "opponent_tier": event.get("opponent_tier"),
+            "opponent_tier_score": event.get("opponent_tier_score"),
+        })
         await self.close()
 
     # --- DB 접근 ---
@@ -132,6 +146,13 @@ class MatchmakingConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _get_profile(self):
         return Profile.objects.get(user_id=self.user.id)
+
+    @database_sync_to_async
+    def _get_tiers(self, user_id_a, user_id_b):
+        """대기 화면에서 서로의 티어를 보여주기 위해, 매칭 성사 시점의 양쪽
+        tier/tier_score를 한 번에 조회한다."""
+        profiles = Profile.objects.filter(user_id__in=(user_id_a, user_id_b))
+        return {p.user_id: {"tier": p.tier, "tier_score": p.tier_score} for p in profiles}
 
     @database_sync_to_async
     def _create_ranked_room(self, partner_id):

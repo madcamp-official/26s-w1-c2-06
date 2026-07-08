@@ -5,7 +5,7 @@ import { playSubmit, playType } from '../lib/sound';
 import BeeIcon from './BeeIcon';
 import './GameScreen.css';
 
-const ITEM_BADGE: Record<'alert' | 'ink', string> = { alert: '⚠️', ink: '💧' };
+const ITEM_BADGE: Record<'alert' | 'honey', string> = { alert: '⚠️', honey: '🍯' };
 
 // 판정 결과가 온 뒤 코드가 점수판으로 날아가며 사라지는 연출 시간(ms).
 // LobbyPage가 이 시간만큼 기다렸다가 falling 목록에서 실제로 제거한다.
@@ -89,7 +89,7 @@ interface GameScreenProps {
   duration: number;
   clockOffset: number;
   feedback: 'correct' | 'incorrect' | 'miss' | null;
-  inkEffects: ActiveItemEffect[];
+  honeyEffects: ActiveItemEffect[];
   alerts: ActiveItemEffect[];
   onDismissAlert: (id: string) => void;
   onSubmit: (text: string) => void;
@@ -107,7 +107,7 @@ function GameScreen({
   duration,
   clockOffset,
   feedback,
-  inkEffects,
+  honeyEffects,
   alerts,
   onDismissAlert,
   onSubmit,
@@ -405,20 +405,22 @@ function GameScreen({
           );
         })}
 
-        {/* 상대가 맞힌 먹물 아이템 — fall-field 위에만 덮어서 낙하 중인 코드를 가린다.
+        {/* 상대가 맞힌 꿀 아이템 — fall-field 위에만 덮어서 낙하 중인 코드를 가린다.
             중첩 시 지속시간을 연장하지 않고 겹쳐서 쌓인다(§7 결정) — 각자 자기
-            타임아웃(LobbyPage의 INK_EFFECT_MS)에 맞춰 개별적으로 사라진다. */}
-        {inkEffects.map((effect) => (
+            타임아웃(LobbyPage의 HONEY_EFFECT_MS)에 맞춰 개별적으로 사라진다. */}
+        {honeyEffects.map((effect) => (
           <div
             key={effect.id}
-            className="ink-blot"
+            className="honey-effect"
             style={{
               '--blot-x': `${hashToPercent(effect.id)}%`,
               '--blot-y': `${hashToPercent(`${effect.id}y`)}%`,
               '--blot-rotate': `${hashToPercent(`${effect.id}r`) - 45}deg`,
             } as CSSProperties}
             aria-hidden="true"
-          />
+          >
+            <div className="honey-blot" />
+          </div>
         ))}
       </div>
 

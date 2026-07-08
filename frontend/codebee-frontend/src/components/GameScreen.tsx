@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, FormEvent } from 'react';
 import type { ActiveItemEffect, FallingCode, ScoreBoard, ScorePop } from '../types';
+import { playSubmit, playType } from '../lib/sound';
 import BeeIcon from './BeeIcon';
 import './GameScreen.css';
 
@@ -263,6 +264,7 @@ function GameScreen({
     event.preventDefault();
     const text = input.trim();
     if (!text) return;
+    playSubmit();
     onSubmit(text);
     setInput('');
   }
@@ -271,6 +273,7 @@ function GameScreen({
     const next = event.target.value;
     // 글자를 지울 땐 터뜨리지 않고, 실제로 새 글자가 들어갔을 때만 파티클을 튄다.
     if (next.length > input.length && measureRef.current && inputElRef.current) {
+      playType();
       // 방금 입력한 글자의 "시작" 지점(=커서 왼쪽)을 재기 위해 마지막 글자를 뺀 텍스트로 측정한다.
       // .input-measure의 padding-left가 입력창의 테두리+패딩과 동일해서, offsetWidth 자체가
       // 입력창 왼쪽 끝(border-box) 기준 텍스트 시작 위치를 그대로 나타낸다.

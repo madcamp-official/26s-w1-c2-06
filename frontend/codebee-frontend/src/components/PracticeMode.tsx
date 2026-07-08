@@ -10,6 +10,7 @@ import {
   computeCorrectScore,
   computeFallDurationMs,
 } from '../lib/gameConstants';
+import { playCorrect, playTypo, playWrong, startGameBgm, startLobbyBgm } from '../lib/sound';
 import type { ActiveItemEffect, FallingCode, PracticeSnippet, ScoreBoard, ScorePop } from '../types';
 import GameScreen, { RESOLVE_ANIM_MS } from './GameScreen';
 
@@ -116,6 +117,13 @@ function PracticeMode({ myUsername, onExit }: PracticeModeProps) {
     return () => window.clearTimeout(timer);
   }, [phase]);
 
+  // BGM 전환 — 연습모드가 떠 있는 동안엔 LobbyPage의 BGM effect가 관여하지
+  // 않으므로(§LobbyPage practiceActive 가드) 여기서 전부 직접 관리한다.
+  useEffect(() => {
+    if (phase === 'playing') startGameBgm();
+    else startLobbyBgm();
+  }, [phase]);
+
   // 연습봇 — 난이도별 간격마다 현재 낙하 중인 미판정 정답 코드 중 하나를 랜덤으로 맞힌다.
   useEffect(() => {
     if (phase !== 'playing') return;
@@ -133,6 +141,10 @@ function PracticeMode({ myUsername, onExit }: PracticeModeProps) {
   }, [phase, difficulty]);
 
   function pulseFeedback(next: 'correct' | 'incorrect' | 'miss') {
+    if (next === 'correct') playCorrect();
+    else if (next === 'incorrect') playWrong();
+    else playTypo();
+
     setFeedback(null);
     requestAnimationFrame(() => {
       setFeedback(next);

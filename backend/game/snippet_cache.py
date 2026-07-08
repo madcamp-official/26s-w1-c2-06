@@ -19,4 +19,7 @@ def clear_snippet_pool(room_code):
 
 @database_sync_to_async
 def _load_snippets():
-    return list(CodeSnippet.objects.values("id", "text", "is_correct"))
+    # 실전(친선전+랭킹전) 전용 풀만 사용 — 연습모드(pool="practice")는 별도 endpoint
+    # (views.practice_snippets)에서 내려준다. 두 풀을 섞으면 연습모드로 반복 노출된
+    # 스니펫을 실전에서 그대로 암기해서 맞히는 게 가능해진다.
+    return list(CodeSnippet.objects.filter(pool="match").values("id", "text", "is_correct"))

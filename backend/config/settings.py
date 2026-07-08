@@ -38,6 +38,10 @@ CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS',
 # .env로 뺐다 (docs/plan/game-items.md).
 ITEM_ATTACH_PROB = float(os.environ.get('ITEM_ATTACH_PROB', '0.2'))
 
+# 스폰 시점(spawn_ts)으로부터 이 시간(ms) 안에 도착한 제출은 사람의 반응시간으로 불가능하다고
+# 보고 무효 처리한다 — 봇 방어(공정 플레이 다층 설계, Layer 1). QA 중 조정할 수 있게 .env로 뺐다.
+MIN_REACTION_MS = int(os.environ.get('MIN_REACTION_MS', '250'))
+
 
 # Application definition
 

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import random
 import time
 import uuid
@@ -17,6 +18,9 @@ from .models import GameResult, Profile, Room
 from .redis_client import get_redis
 from .redis_scripts import get_submit_script
 from .snippet_cache import clear_snippet_pool, get_snippet_pool
+
+# 공정 플레이 관측용 로거(Layer 3) — 별도 저장소 없이 Django 기본 로깅(journalctl)에 남긴다.
+fairplay_logger = logging.getLogger("game.fairplay")
 
 GAME_DURATION_MS = 60000
 SCORE_DELTA_INCORRECT = -500
@@ -38,6 +42,19 @@ SCORE_CORRECT_MAX = 1000
 
 def compute_correct_score(text):
     return min(SCORE_CORRECT_MAX, SCORE_CORRECT_BASE + len(text) * SCORE_CORRECT_PER_CHAR)
+
+# 공정 플레이 방어 Layer 2 — 브라우저가 아닌 WS 클라이언트(headless 스크립트 등)는 Origin
+# 헤더를 안 보내거나 다른 값을 보내는 경우가 많다. 로컬 개발(Vite :5173)은 Origin이 그대로
+# 찍혀서 별도로 맞춰줄 필요가 있는 데다, 이 검증의 목적 자체가 "배포된 실제 서비스를 상대로
+# 한 봇"을 막는 것이므로 DEBUG일 때는 검증을 생략한다.
+ALLOWED_ORIGINS = {"https://codebee.madcamp-kaist.org"}
+
+
+def _origin_allowed(scope):
+    if settings.DEBUG:
+        return True
+    origin = dict(scope.get("headers", [])).get(b"origin", b"").decode()
+    return origin in ALLOWED_ORIGINS
 
 # codes:{room} 해시 값 패킹 구분자 — "|"는 코드 텍스트 자체에 나올 수 있어(예:
 # `Optional[int] | None`) 쓰지 않는다. 제어문자라 실제 코드 스니펫에 나올 일이 없다.
@@ -75,6 +92,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         self.user = self.scope["user"]
 
         if not self.user.is_authenticated:
+            await self.close()
+            return
+
+        if not _origin_allowed(self.scope):
             await self.close()
             return
 
@@ -473,7 +494,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         script = get_submit_script()
         now_ms = int(time.time() * 1000)
         correct_delta = compute_correct_score(text)
-        result, detail, item = await script(
+        result, detail, item, spawn_ts = await script(
             keys=[
                 f"text_index:{self.room_code}",
                 f"codes:{self.room_code}",
@@ -488,6 +509,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 now_ms,
                 GAME_DURATION_MS,
                 self.room_code,
+                settings.MIN_REACTION_MS,
             ],
         )
 
@@ -496,6 +518,14 @@ class GameConsumer(AsyncWebsocketConsumer):
             # — 이번 판 점수에는 아무 영향 없음. 제출한 유저에게만 알려준다.
             await self._send_json({"type": "code.submit.ack", "outcome": detail, "delta": 0})
             return
+
+        # 공정 플레이 관측(Layer 3) — 실제로 채점된 제출(정답/오답)만 기록. 반응시간이
+        # 비정상적으로 균일하거나(봇 특유) 오답이 한 번도 없는 계정을 사후에 사람이
+        # journalctl -u codebee | grep fairplay 로 찾아볼 수 있게 남겨두는 용도.
+        fairplay_logger.info(
+            "submit user=%s room=%s correct=%s reaction_ms=%s",
+            self.user.id, self.room_code, result == 1, now_ms - spawn_ts,
+        )
 
         await self.channel_layer.group_send(
             self.room_group_name,

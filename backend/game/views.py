@@ -224,7 +224,9 @@ def practice_snippets(request):
     if not request.user.is_authenticated:
         return JsonResponse({"error": "not_authenticated"}, status=401)
 
-    snippets = list(CodeSnippet.objects.values("id", "text", "is_correct"))
+    # 실전(match) 풀과 분리된 연습 전용 풀만 내려준다 — 실전 스니펫이 섞여 있으면
+    # 연습으로 반복 노출된 걸 그대로 암기해서 실전에서 맞히는 게 가능해진다.
+    snippets = list(CodeSnippet.objects.filter(pool="practice").values("id", "text", "is_correct"))
     return JsonResponse({"snippets": snippets})
 
 

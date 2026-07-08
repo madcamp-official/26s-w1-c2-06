@@ -64,7 +64,10 @@ class SubmitScriptTests(SimpleTestCase):
         self.redis.hset(f"text_index:{self.room}", text, code_id)
         self.redis.set(f"game_started_at:{self.room}", now_ms - started_ago_ms)
 
-    def _submit(self, text, user_id=None):
+    def _submit(self, text, user_id=None, min_reaction_ms=0):
+        # min_reaction_ms 기본값 0 — 이 테스트 클래스의 다른 시나리오(정답/오답/선점/만료 등)는
+        # 반응시간 하한(Layer 1)과 무관하므로 실질적으로 비활성 상태로 둔다.
+        # test_submission_too_fast_is_rejected만 실제 값을 넘겨서 이 기능 자체를 검증한다.
         now_ms = int(time.time() * 1000)
         return self.script(
             keys=self.keys,
@@ -76,13 +79,14 @@ class SubmitScriptTests(SimpleTestCase):
                 now_ms,
                 DURATION_MS,
                 self.room,
+                min_reaction_ms,
             ],
         )
 
     def test_correct_submission_scores_plus_500_and_removes_code(self):
         self._seed_code("1", "print(x)", is_correct=True)
 
-        result, detail, item = self._submit("print(x)")
+        result, detail, item, spawn_ts = self._submit("print(x)")
 
         self.assertEqual(result, 1)
         self.assertEqual(detail, "1")
@@ -94,7 +98,7 @@ class SubmitScriptTests(SimpleTestCase):
     def test_correct_submission_with_item_returns_item(self):
         self._seed_code("1b", "print(y)", is_correct=True, item="honey")
 
-        result, detail, item = self._submit("print(y)")
+        result, detail, item, spawn_ts = self._submit("print(y)")
 
         self.assertEqual(result, 1)
         self.assertEqual(detail, "1b")
@@ -103,7 +107,7 @@ class SubmitScriptTests(SimpleTestCase):
     def test_incorrect_submission_scores_minus_500_and_removes_code(self):
         self._seed_code("2", "print(x", is_correct=False)
 
-        result, detail, item = self._submit("print(x")
+        result, detail, item, spawn_ts = self._submit("print(x")
 
         self.assertEqual(result, -1)
         self.assertEqual(detail, "2")
@@ -113,7 +117,7 @@ class SubmitScriptTests(SimpleTestCase):
     def test_text_not_on_screen_is_no_match(self):
         self._seed_code("3", "def f():", is_correct=True)
 
-        result, detail, item = self._submit("이 텍스트는 화면에 없음")
+        result, detail, item, spawn_ts = self._submit("이 텍스트는 화면에 없음")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "no_match")
@@ -128,7 +132,7 @@ class SubmitScriptTests(SimpleTestCase):
         claim_key = f"claim:{self.room}:4"
         self.redis.set(claim_key, "other-user", nx=True, ex=30)
 
-        result, detail, item = self._submit("return a + b")
+        result, detail, item, spawn_ts = self._submit("return a + b")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "too_late")
@@ -143,7 +147,7 @@ class SubmitScriptTests(SimpleTestCase):
     def test_submission_after_game_duration_is_game_over(self):
         self._seed_code("5", "raise ValueError('bad')", is_correct=True, started_ago_ms=DURATION_MS + 1000)
 
-        result, detail, item = self._submit("raise ValueError('bad')")
+        result, detail, item, spawn_ts = self._submit("raise ValueError('bad')")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "game_over")
@@ -158,7 +162,7 @@ class SubmitScriptTests(SimpleTestCase):
         # 오르는" 버그가 재현된다.
         self._seed_code("6", "def g():", is_correct=True, code_age_ms=10_000, fall_duration_ms=9000)
 
-        result, detail, item = self._submit("def g():")
+        result, detail, item, spawn_ts = self._submit("def g():")
 
         self.assertEqual(result, 0)
         self.assertEqual(detail, "expired")
@@ -167,6 +171,21 @@ class SubmitScriptTests(SimpleTestCase):
         # 만료된 코드는 더 이상 매치되면 안 되므로 인덱스/코드 해시에서 함께 제거된다
         self.assertIsNone(self.redis.hget(f"text_index:{self.room}", "def g():"))
         self.assertIsNone(self.redis.hget(f"codes:{self.room}", "6"))
+
+    def test_submission_too_fast_is_rejected(self):
+        # 공정 플레이 방어 Layer 1 — spawn 직후(사람 반응시간으로 불가능한 속도) 도착한
+        # 제출은 정답이어도 무효 처리되고 점수도 안 오른다. 코드/매치 데이터는 보존해서
+        # (too_late 케이스처럼) 이후 정상 속도의 제출이 여전히 채점될 수 있게 한다.
+        self._seed_code("7", "class Dog:", is_correct=True, code_age_ms=10)
+
+        result, detail, item, spawn_ts = self._submit("class Dog:", min_reaction_ms=250)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(detail, "too_fast")
+        self.assertEqual(item, "")
+        self.assertIsNone(self.redis.zscore(f"score:{self.room}", str(self.user_id)))
+        self.assertEqual(self.redis.hget(f"text_index:{self.room}", "class Dog:"), "7")
+        self.assertIsNotNone(self.redis.hget(f"codes:{self.room}", "7"))
 
 
 class MatchScriptTests(SimpleTestCase):
@@ -303,6 +322,27 @@ class GameEndLockTests(SimpleTestCase):
         self.assertEqual(self.redis.get(self.key), "process-a")
 
 
+class CodeSnippetPoolTests(TestCase):
+    """연습모드/실전 스니펫 풀 분리 — pool 필드로 물리적으로 나뉘어 있는지 확인한다."""
+
+    def test_match_pool_excludes_practice_snippets(self):
+        CodeSnippet.objects.create(text="pool_match_x", is_correct=True, pool="match")
+        CodeSnippet.objects.create(text="pool_practice_x", is_correct=True, pool="practice")
+
+        match_texts = set(CodeSnippet.objects.filter(pool="match").values_list("text", flat=True))
+        self.assertIn("pool_match_x", match_texts)
+        self.assertNotIn("pool_practice_x", match_texts)
+
+    def test_practice_pool_excludes_match_snippets(self):
+        CodeSnippet.objects.create(text="pool_match_y", is_correct=True, pool="match")
+        CodeSnippet.objects.create(text="pool_practice_y", is_correct=True, pool="practice")
+
+        practice_texts = set(CodeSnippet.objects.filter(pool="practice").values_list("text", flat=True))
+        self.assertIn("pool_practice_y", practice_texts)
+        self.assertNotIn("pool_match_y", practice_texts)
+
+
+@override_settings(MIN_REACTION_MS=0)
 class GameConsumerIntegrationTests(TransactionTestCase):
     """connect → game.start → code.spawn → code.submit → code.result 흐름을
     실제 Channels WebsocketCommunicator + 로컬 Redis 채널 레이어로 검증한다.
@@ -341,6 +381,10 @@ class GameConsumerIntegrationTests(TransactionTestCase):
         communicator = WebsocketCommunicator(GameConsumer.as_asgi(), f"/ws/room/{self.room_code}/")
         communicator.scope["url_route"] = {"kwargs": {"code": self.room_code}}
         communicator.scope["user"] = user
+        # manage.py test는 DEBUG를 강제로 False로 만들어서(Django 테스트 러너 기본 동작)
+        # 공정 플레이 방어 Layer 2(Origin 검증)가 실제 배포처럼 켜진 채로 테스트가 돈다 —
+        # 정상 프론트가 보낼 값을 그대로 흉내내야 연결이 성립한다.
+        communicator.scope["headers"] = [(b"origin", b"https://codebee.madcamp-kaist.org")]
         connected, _ = await communicator.connect()
         self.assertTrue(connected)
         return communicator
@@ -453,9 +497,23 @@ class MatchmakingConsumerIntegrationTests(TransactionTestCase):
     async def _connect(self, user):
         communicator = WebsocketCommunicator(MatchmakingConsumer.as_asgi(), "/ws/matchmaking/")
         communicator.scope["user"] = user
+        # manage.py test가 DEBUG=False로 돌리므로 Layer 2(Origin 검증)가 실제로 켜진다 —
+        # 정상 프론트가 보낼 값을 그대로 흉내내야 연결이 성립한다.
+        communicator.scope["headers"] = [(b"origin", b"https://codebee.madcamp-kaist.org")]
         connected, _ = await communicator.connect()
         self.assertTrue(connected)
         return communicator
+
+    async def test_connect_rejected_without_valid_origin(self):
+        # 공정 플레이 방어 Layer 2 — 브라우저가 아닌 클라이언트(예: requests/websockets로
+        # 직접 붙는 봇 스크립트)는 보통 Origin 헤더를 안 보내거나 다른 값을 보낸다.
+        # manage.py test는 DEBUG=False로 돌기 때문에(Django 테스트 러너 기본 동작) 이
+        # 검증이 실제 배포와 동일하게 켜진 상태에서 테스트된다.
+        communicator = WebsocketCommunicator(MatchmakingConsumer.as_asgi(), "/ws/matchmaking/")
+        communicator.scope["user"] = self.user1
+        communicator.scope["headers"] = []  # Origin 헤더 없음 — 봇 스크립트가 보통 이런 상태
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
 
     async def test_two_queued_users_get_matched_into_ranked_room(self):
         comm1 = await self._connect(self.user1)

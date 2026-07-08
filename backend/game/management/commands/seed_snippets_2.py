@@ -2,70 +2,72 @@ from django.core.management.base import BaseCommand
 
 from game.models import CodeSnippet
 
-# seed_snippets.py 이후 추가하는 두 번째 배치 (정답, 오답) 쌍.
-# 기존 SNIPPET_PAIRS와 텍스트가 겹치면 unique 제약 + ignore_conflicts로 어차피
-# 무시되지만, 배치를 별도 파일/커맨드로 나눠서 어떤 걸 언제 추가했는지 추적하기
-# 쉽게 하고 seed_snippets.py 원본은 건드리지 않는다.
+# (정답 코드, 오답 코드) 쌍 — 연습모드 전용 풀(pool="practice").
+# seed_snippets.py(실전 풀)와 문법 범위가 겹치지 않게 컴프리헨션/데코레이터/타입힌트 등
+# 조금 더 다양한 패턴 위주로 구성했다. 텍스트는 전부 서로 달라야 한다 (CodeSnippet.text
+# unique 제약, seed_snippets.py의 실전 풀과도 겹치면 안 됨).
 SNIPPET_PAIRS = [
-    ("nums = [x for x in items]", "nums = [x for x items]"),
-    ("pairs = {k: v for k, v in d.items()}", "pairs = {k: v for k v in d.items()}"),
-    ("s = {1, 2, 3}", "s = {1, 2, 3]"),
-    ("x if cond else y", "x if cond y"),
-    ("if (n := len(a)) > 0:", "if (n = len(a)) > 0:"),
-    ("@staticmethod", "@statimethod"),
-    ("@classmethod", "@classmethd"),
-    ("@property", "@propery"),
-    ("@dataclass", "@datclass"),
-    ("def f(x: int) -> int:", "def f(x: int) - int:"),
-    ("def f(*args):", "def f(*args)"),
-    ("def f(**kwargs):", "def f(**kwargs)"),
-    ("def f(x=1):", "def f(x=1)"),
-    ("for i, v in enumerate(nums):", "for i, v enumerate(nums):"),
-    ("for a, b in zip(x, y):", "for a, b in zip(x, y)"),
-    ("nums[1:3]", "nums[1:3"),
-    ("nums[-1]", "nums[-1)"),
+    ("nums2 = [v * 2 for v in nums]", "nums2 = [v * 2 for v nums]"),
+    ("evens = [v for v in nums if v % 2 == 0]", "evens = [v for v if v % 2 == 0]"),
+    ("squares = {v: v**2 for v in nums}", "squares = {v: v**2 for v nums}"),
+    ("uniq = {v for v in nums}", "uniq = {v for v nums}"),
+    ("gen = (v for v in nums)", "gen = (v for v nums)"),
+    ("count if count else 0", "count if count else"),
+    ("@property", "@propety"),
+    ("@staticmethod", "@staticmehod"),
+    ("@classmethod", "@classmehod"),
+    ("@dataclass", "@dataclas"),
+    ("def greet(name: str) -> str:", "def greet(name: str) - str:"),
+    ("def add(*args):", "def add(*args)"),
+    ("def merge(**kwargs):", "def merge(**kwargs)"),
+    ("def scale(x, factor=2):", "def scale(x, factor=2)"),
+    ("f'{name} is here'", "f'{name is here}'"),
+    ("f'{n:.2f}'", "f'{n:.2f'"),
     ("first, *rest = nums", "first *rest = nums"),
-    ("','.join(items)", "','.join(items"),
-    ("'{}'.format(x)", "'{}'.formt(x)"),
-    ("global counter", "global counter:"),
-    ("nonlocal total", "nonlocal total;"),
-    ("del nums[0]", "del nums[0"),
-    ("x not in nums", "x not nums"),
-    ("x is None", "x iss None"),
-    ("0 < x < 10", "0 < x < 10:"),
-    ("except (TypeError, ValueError):", "except (TypeError, ValueError)"),
-    ("raise ValueError from e", "raise ValueError form e"),
+    ("*init, last = nums", "*init last = nums"),
+    ("x, (y, z) = 1, (2, 3)", "x, (y z) = 1, (2, 3)"),
+    ("with open('f') as fh:", "with open('f') as fh"),
     ("with a, b:", "with a b:"),
-    ("match x:", "match x"),
-    ("case 1:", "case 1"),
+    ("match cmd:", "match cmd"),
+    ("case 'start':", "case 'start'"),
+    ("case _:", "case _"),
+    ("if (total := sum(nums)) > 0:", "if (total = sum(nums)) > 0:"),
+    ("for i, v in enumerate(nums):", "for i, v enumerate(nums):"),
+    ("for x, y in zip(a, b):", "for x, y in zip(a, b)"),
+    ("nums[::2]", "nums[::2"),
+    ("nums[1:-1]", "nums[1:-1)"),
+    ("sorted(nums, key=abs)", "sorted(nums, key=abs"),
+    ("max(nums, key=len)", "max(nums, key=len"),
+    ("min(nums, default=0)", "min(nums, default=0"),
+    ("any(v > 0 for v in nums)", "any(v > 0 for v nums)"),
+    ("all(v > 0 for v in nums)", "all(v > 0 for v nums)"),
     ("from abc import ABC", "form abc import ABC"),
-    ("from enum import Enum", "from enum imprt Enum"),
-    ("json.loads(s)", "json.loads(s"),
-    ("json.dumps(d)", "json.dumps(d"),
-    ("open('f', 'r')", "open('f', 'r'"),
-    ("os.path.join(a, b)", "os.path.join(a, b"),
-    ("nums.sort(key=len)", "nums.sort(key=len"),
-    ("max(nums, key=abs)", "max(nums, key=abs"),
-    ("min(nums)", "min(nums"),
-    ("sum(nums)", "sum(nums"),
-    ("any(nums)", "any(nums"),
-    ("all(nums)", "all(nums"),
-    ("round(x, 2)", "round(x, 2"),
-    ("abs(-x)", "abs(-x"),
-    ("str(x)", "str(x"),
-    ("int('5')", "int('5'"),
-    ("float('1.5')", "float('1.5'"),
+    ("from enum import Enum", "form enum import Enum"),
+    ("from pathlib import Path", "form pathlib import Path"),
+    ("from typing import Optional", "form typing import Optional"),
+    ("json.dumps(data)", "json.dumps(data"),
+    ("json.loads(raw)", "json.loads(raw"),
+    ("Path('f').exists()", "Path('f').exsits()"),
+    ("Optional[int] | None", "Optional[int] | Nonee"),
+    ("isinstance(x, (int, float))", "isinstance(x, (int, float)"),
+    ("super().__init__(name)", "super().__init(name)"),
+    ("raise ValueError from exc", "raise ValueError form exc"),
+    ("except (KeyError, TypeError):", "except (KeyError, TypeError)"),
+    ("async with lock:", "async with lock"),
+    ("async for item in stream:", "async for item stream:"),
+    ("yield from gen", "yeild from gen"),
+    ("nonlocal total", "nonlocal total;"),
 ]
 
 
 class Command(BaseCommand):
-    help = "CodeSnippet 정답/오답 시드 데이터 두 번째 배치를 넣는다 (재실행해도 안전, 중복은 무시)"
+    help = "CodeSnippet 정답/오답 시드 데이터(연습 풀)를 넣는다 (재실행해도 안전, 중복은 무시)"
 
     def handle(self, *args, **options):
         objs = []
         for correct, incorrect in SNIPPET_PAIRS:
-            objs.append(CodeSnippet(text=correct, is_correct=True))
-            objs.append(CodeSnippet(text=incorrect, is_correct=False))
+            objs.append(CodeSnippet(text=correct, is_correct=True, pool="practice"))
+            objs.append(CodeSnippet(text=incorrect, is_correct=False, pool="practice"))
 
         before = CodeSnippet.objects.count()
         CodeSnippet.objects.bulk_create(objs, ignore_conflicts=True)

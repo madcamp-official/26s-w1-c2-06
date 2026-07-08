@@ -3,6 +3,7 @@ import contextlib
 import json
 import random
 import time
+import uuid
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -327,7 +328,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if snippet is None:
             return  # 후보를 10번 뽑아도 전부 중복 — 이번 틱은 스킵 (풀 소진에 가까움)
 
-        code_id = str(snippet["id"])
+        code_id = uuid.uuid4().hex
         spawn_ts = int(time.time() * 1000)
         duration_ms = compute_fall_duration_ms(snippet["text"], fall_speed_mult)
 

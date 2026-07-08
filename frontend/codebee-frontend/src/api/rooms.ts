@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { LeaderboardEntry, Room } from '../types';
+import type { LeaderboardEntry, Room, WorstEntry } from '../types';
 
 export function createRoom() {
   return apiFetch<Room>('/api/rooms/', { method: 'POST' });
@@ -14,5 +14,7 @@ export function getRoom(code: string) {
 }
 
 export function getLeaderboard() {
-  return apiFetch<{ entries: LeaderboardEntry[]; me: LeaderboardEntry | null }>('/api/leaderboard/');
+  return apiFetch<{ entries: LeaderboardEntry[]; me: LeaderboardEntry | null; worst: WorstEntry[] }>(
+    '/api/leaderboard/',
+  );
 }

@@ -13,6 +13,14 @@
   color: var(--text);
 }
 
+/* "전체 랭킹" 섹션 전체를 감싸는 테두리 — 하위권 섹션(.leaderboard-worst)과
+   대비되는 차분한 고정 테두리로 구역을 분리한다. */
+.leaderboard-top {
+  padding: 12px 12px 4px;
+  border: 3px solid var(--text-h);
+  box-sizing: border-box;
+}
+
 .leaderboard-list {
   display: flex;
   flex-direction: column;
@@ -20,6 +28,17 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  /* 동점자 그룹이 표기 인원 수(top 5 / worst 3)를 넘어서면 전부 표기하고
+     스크롤로 보게 한다 — 약 5줄 높이로 고정. 스크롤은 되지만 스크롤바 자체는
+     안 보이게 숨긴다(기능만 유지). */
+  max-height: 264px;
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 레거시 Edge/IE */
+}
+
+.leaderboard-list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/신형 Edge */
 }
 
 .leaderboard-list li {
@@ -43,6 +62,7 @@
 }
 
 .leaderboard-rank {
+  position: relative;
   width: 20px;
   color: var(--text);
   font-size: 12px;
@@ -55,7 +75,200 @@
   color: var(--text-h);
 }
 
-.leaderboard-score {
-  font-family: var(--mono);
-  color: var(--text-h);
+/* 1/2/3등 — 랭크 숫자 위에 왕관/메달을 얹고 금은동 네온으로 강조 */
+.rank-medal {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  font-size: 13px;
+  transform: translateX(-50%) rotate(-6deg);
+  animation: rank-medal-bob 1.6s ease-in-out infinite;
 }
+
+@keyframes rank-medal-bob {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0) rotate(-8deg);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-3px) rotate(8deg);
+  }
+}
+
+.leaderboard-list li.rank-1 {
+  border-color: var(--neon-gold);
+}
+.leaderboard-list li.rank-1 .leaderboard-rank {
+  color: var(--neon-gold);
+  text-shadow:
+    0 0 6px var(--neon-gold),
+    0 0 14px rgba(255, 215, 0, 0.6);
+}
+
+.leaderboard-list li.rank-2 {
+  border-color: var(--neon-silver);
+}
+.leaderboard-list li.rank-2 .leaderboard-rank {
+  color: var(--neon-silver);
+  text-shadow:
+    0 0 6px var(--neon-silver),
+    0 0 12px rgba(217, 219, 229, 0.6);
+}
+
+.leaderboard-list li.rank-3 {
+  border-color: var(--neon-bronze);
+}
+.leaderboard-list li.rank-3 .leaderboard-rank {
+  color: var(--neon-bronze);
+  text-shadow:
+    0 0 6px var(--neon-bronze),
+    0 0 12px rgba(255, 154, 77, 0.6);
+}
+
+/* 하위권 놀리기 섹션 — 일부러 정신없이 화려하게, 회전하는 무지개 테두리 +
+   항목마다 다른 네온색으로 따로따로 깜빡이게 만들어 "명예의 전당"을 놀림감으로 연출 */
+.leaderboard-worst {
+  position: relative;
+  margin-top: 16px;
+  padding: 16px 12px 12px;
+  border-radius: 4px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.leaderboard-worst::before {
+  content: '';
+  position: absolute;
+  inset: -60%;
+  z-index: -2;
+  background: conic-gradient(
+    from 0deg,
+    var(--neon-red),
+    var(--neon-yellow),
+    var(--neon-green),
+    var(--neon-cyan),
+    var(--neon-magenta),
+    var(--neon-red)
+  );
+  animation: worst-border-spin 3s linear infinite;
+  filter: blur(3px);
+}
+
+.leaderboard-worst::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  background: var(--code-bg);
+  border-radius: 3px;
+}
+
+@keyframes worst-border-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.leaderboard-worst h3 {
+  text-align: center;
+  color: var(--neon-red);
+  text-shadow:
+    0 0 8px currentColor,
+    0 0 20px currentColor;
+  animation:
+    worst-title-flicker 1.6s ease-in-out infinite,
+    worst-title-hue 4s linear infinite;
+}
+
+@keyframes worst-title-hue {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+
+/* 낡은 네온사인 특유의 불규칙한 깜빡임 */
+@keyframes worst-title-flicker {
+  0%,
+  19%,
+  21%,
+  23%,
+  54%,
+  56%,
+  100% {
+    opacity: 1;
+  }
+  20%,
+  22%,
+  55% {
+    opacity: 0.55;
+  }
+}
+
+.worst-list li.worst-entry {
+  --worst-glow: var(--neon-red);
+  position: relative;
+  border-color: var(--worst-glow);
+  background: color-mix(in srgb, var(--worst-glow) 12%, transparent);
+  animation:
+    worst-item-wobble 1.4s ease-in-out infinite,
+    worst-item-glow 1.4s ease-in-out infinite;
+}
+
+/* 동점자 그룹으로 하위권 인원이 3명을 넘어설 수 있어 nth-child(2)/(3) 고정
+   대신 3개 주기로 색이 순환하게 한다. */
+.worst-list li.worst-entry:nth-child(3n + 2) {
+  --worst-glow: var(--neon-magenta);
+  animation-delay: 0.25s, 0.25s;
+}
+
+.worst-list li.worst-entry:nth-child(3n) {
+  --worst-glow: var(--neon-cyan);
+  animation-delay: 0.5s, 0.5s;
+}
+
+@keyframes worst-item-wobble {
+  0%,
+  100% {
+    transform: rotate(-1.5deg);
+  }
+  50% {
+    transform: rotate(1.5deg);
+  }
+}
+
+@keyframes worst-item-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 6px var(--worst-glow),
+      inset 0 0 4px var(--worst-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 22px var(--worst-glow),
+      inset 0 0 10px var(--worst-glow);
+  }
+}
+
+.worst-rank {
+  width: auto;
+  padding: 2px 7px;
+  border: 2px solid var(--text-h);
+  background: var(--worst-glow, var(--neon-red));
+  color: #fff;
+  font-family: var(--pixel-display);
+  font-size: 9px;
+  white-space: nowrap;
+  transform: rotate(-4deg);
+  box-shadow: 0 0 10px var(--worst-glow, var(--neon-red));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rank-medal,
+  .leaderboard-worst::before,
+  .leaderboard-worst h3,
+  .worst-list li.worst-entry {
+    animation: none;
+  }
+}
+

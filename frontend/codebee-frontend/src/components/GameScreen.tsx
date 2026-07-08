@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, FormEvent } from 'react';
-import type { FallingCode, ScoreBoard, ScorePop } from '../types';
+import type { ActiveItemEffect, FallingCode, ScoreBoard, ScorePop } from '../types';
+import { playSubmit, playType } from '../lib/sound';
+import BeeIcon from './BeeIcon';
 import './GameScreen.css';
+
+const ITEM_BADGE: Record<'alert' | 'ink', string> = { alert: '⚠️', ink: '💧' };
 
 // 판정 결과가 온 뒤 코드가 점수판으로 날아가며 사라지는 연출 시간(ms).
 // LobbyPage가 이 시간만큼 기다렸다가 falling 목록에서 실제로 제거한다.
@@ -44,16 +48,33 @@ function hashToPercent(seed: string): number {
   return Math.abs(hash) % 90;
 }
 
-// 코드를 물고 나르는 벌 아이콘 — 픽셀 느낌의 각진 사각형으로만 구성.
-function BeeIcon({ flapping }: { flapping?: boolean }) {
+// .falling-code는 폰트 22px 모노스페이스 + 좌우 padding 10px씩. 실측 대신 대략적인
+// 글자 폭으로 너비를 추정해서, 코드가 길수록 fall-field 가장자리에서 더 안쪽에
+// 떨어지도록 좌우 위치 범위를 좁힌다 — 그래야 overflow:hidden에 잘리지 않는다.
+const CHAR_WIDTH_PX = 13;
+const CODE_PADDING_PX = 24;
+
+function clampedLeftPercent(seed: string, text: string, containerWidth: number): number {
+  const rawPercent = hashToPercent(seed);
+  if (containerWidth <= 0) return rawPercent;
+
+  const halfWidthPercent = ((text.length * CHAR_WIDTH_PX + CODE_PADDING_PX) / 2 / containerWidth) * 100;
+  const min = halfWidthPercent;
+  const max = 100 - halfWidthPercent;
+  if (min > max) return 50; // 코드가 컨테이너보다 넓을 정도면 그냥 가운데
+  return Math.min(max, Math.max(min, rawPercent));
+}
+
+// 지금까지 입력한 내용이 이 코드의 접두사와 일치하면, 일치한 부분만 색을 바꿔 하이라이트한다.
+function renderCodeText(text: string, typedInput: string) {
+  if (typedInput.length === 0 || !text.startsWith(typedInput)) {
+    return text;
+  }
   return (
-    <svg className={`bee-icon ${flapping ? 'flapping' : ''}`} viewBox="0 0 24 24" aria-hidden="true">
-      <rect className="bee-wing bee-wing-l" x="1" y="7" width="7" height="5" />
-      <rect className="bee-wing bee-wing-r" x="16" y="7" width="7" height="5" />
-      <rect className="bee-body" x="7" y="8" width="10" height="9" />
-      <rect className="bee-stripe" x="7" y="10" width="10" height="2" />
-      <rect className="bee-stripe" x="7" y="14" width="10" height="2" />
-    </svg>
+    <>
+      <span className="code-typed">{text.slice(0, typedInput.length)}</span>
+      {text.slice(typedInput.length)}
+    </>
   );
 }
 
@@ -68,6 +89,9 @@ interface GameScreenProps {
   duration: number;
   clockOffset: number;
   feedback: 'correct' | 'incorrect' | 'miss' | null;
+  inkEffects: ActiveItemEffect[];
+  alerts: ActiveItemEffect[];
+  onDismissAlert: (id: string) => void;
   onSubmit: (text: string) => void;
   onForfeit: () => void;
 }
@@ -83,6 +107,9 @@ function GameScreen({
   duration,
   clockOffset,
   feedback,
+  inkEffects,
+  alerts,
+  onDismissAlert,
   onSubmit,
   onForfeit,
 }: GameScreenProps) {
@@ -99,6 +126,20 @@ function GameScreen({
   const codeElRefs = useRef(new Map<string, HTMLSpanElement>());
   const myScoreRef = useRef<HTMLDivElement>(null);
   const opponentScoreRef = useRef<HTMLDivElement>(null);
+
+  // 코드가 좌우 가장자리에서 잘리지 않도록, fall-field 실제 너비를 재서 위치 계산에 쓴다.
+  const fallFieldRef = useRef<HTMLDivElement>(null);
+  const [fallFieldWidth, setFallFieldWidth] = useState(0);
+
+  useEffect(() => {
+    const el = fallFieldRef.current;
+    if (!el) return;
+    const update = () => setFallFieldWidth(el.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // 점수판에 도착한 벌이 원래 자리로 돌아가는 연출 — codeId별 왕복 경로(dx, dy의 역방향).
   const [returningBees, setReturningBees] = useState<
@@ -118,6 +159,16 @@ function GameScreen({
   // 글자를 칠 때마다 입력창이 가볍게 떨리는 이펙트.
   const [inputVibrating, setInputVibrating] = useState(false);
   const vibrateTimeoutRef = useRef<number | null>(null);
+
+  // alert 아이템이 걸려있는 동안 입력창을 비활성화하는데, 마지막 하나가 닫히는
+  // 순간(배열이 비게 되는 순간) 다시 타이핑을 이어갈 수 있도록 포커스를 돌려준다.
+  const prevAlertCountRef = useRef(0);
+  useEffect(() => {
+    if (prevAlertCountRef.current > 0 && alerts.length === 0) {
+      inputElRef.current?.focus();
+    }
+    prevAlertCountRef.current = alerts.length;
+  }, [alerts.length]);
 
   useEffect(() => {
     let frame: number;
@@ -213,6 +264,7 @@ function GameScreen({
     event.preventDefault();
     const text = input.trim();
     if (!text) return;
+    playSubmit();
     onSubmit(text);
     setInput('');
   }
@@ -221,12 +273,17 @@ function GameScreen({
     const next = event.target.value;
     // 글자를 지울 땐 터뜨리지 않고, 실제로 새 글자가 들어갔을 때만 파티클을 튄다.
     if (next.length > input.length && measureRef.current && inputElRef.current) {
+      playType();
       // 방금 입력한 글자의 "시작" 지점(=커서 왼쪽)을 재기 위해 마지막 글자를 뺀 텍스트로 측정한다.
       // .input-measure의 padding-left가 입력창의 테두리+패딩과 동일해서, offsetWidth 자체가
       // 입력창 왼쪽 끝(border-box) 기준 텍스트 시작 위치를 그대로 나타낸다.
       measureRef.current.textContent = next.slice(0, -1);
       const inputRect = inputElRef.current.getBoundingClientRect();
-      const x = inputRect.left + measureRef.current.offsetWidth;
+      // 텍스트가 입력창 너비를 넘기면 브라우저가 안을 왼쪽으로 스크롤해서 커서를
+      // 오른쪽 끝에 고정해버린다 — measureRef는 이 스크롤을 모르고 계속 넓어지기만
+      // 하므로, 입력창 오른쪽 끝(테두리+패딩 뺀 안쪽 경계)을 넘지 않게 잡아준다.
+      const maxX = inputRect.right - 17;
+      const x = Math.min(inputRect.left + measureRef.current.offsetWidth, maxX);
       const y = inputRect.top + inputRect.height / 2;
       const id = `${Date.now()}-${Math.random()}`;
       setTypingBursts((prev) => [...prev, { id, x, y, particles: randomTypingParticles() }]);
@@ -247,12 +304,6 @@ function GameScreen({
 
   return (
     <div className="game-screen">
-      {remainingSec > 0 && remainingSec <= 10 && (
-        <div className="countdown-overlay" key={remainingSec} aria-hidden="true">
-          {remainingSec}
-        </div>
-      )}
-
       <div className="game-hud">
         <div className="score-box" ref={myScoreRef}>
           <span className="score-label">{myUsername ?? (myUserId !== null ? '나' : '나(확인 중)')}</span>
@@ -267,7 +318,12 @@ function GameScreen({
               ))}
           </div>
         </div>
-        <div className="game-timer">{remainingSec}s</div>
+        <div
+          className={`game-timer ${remainingSec > 0 && remainingSec <= 10 ? 'game-timer-critical' : ''}`}
+          key={remainingSec <= 10 ? remainingSec : undefined}
+        >
+          {remainingSec}s
+        </div>
         <div className="score-box score-box-right" ref={opponentScoreRef}>
           <span className="score-label">{opponentUsername ?? '상대'}</span>
           <span className="score-value">{opponentScore}</span>
@@ -283,7 +339,7 @@ function GameScreen({
         </div>
       </div>
 
-      <div className="fall-field">
+      <div className="fall-field" ref={fallFieldRef}>
         {falling.map((code) => {
           const resolution = code.resolution;
           const flyTarget = flyTargets[code.codeId];
@@ -310,7 +366,7 @@ function GameScreen({
               } as CSSProperties
             : {
                 top: `${progress * 100}%`,
-                left: `${hashToPercent(code.codeId)}%`,
+                left: `${clampedLeftPercent(code.codeId, code.text, fallFieldWidth)}%`,
                 '--resolve-ms': `${RESOLVE_ANIM_MS}ms`,
               } as CSSProperties;
           return (
@@ -323,7 +379,12 @@ function GameScreen({
               className={`falling-code ${resolvedClass}`}
               style={style}
             >
-              {code.text}
+              {resolution ? code.text : renderCodeText(code.text, input)}
+              {code.item && !resolution && (
+                <span className={`item-badge item-badge-${code.item}`} aria-hidden="true">
+                  {ITEM_BADGE[code.item]}
+                </span>
+              )}
               {resolution && (
                 <>
                   <span className="particle-burst" aria-hidden="true">
@@ -343,7 +404,43 @@ function GameScreen({
             </span>
           );
         })}
+
+        {/* 상대가 맞힌 먹물 아이템 — fall-field 위에만 덮어서 낙하 중인 코드를 가린다.
+            중첩 시 지속시간을 연장하지 않고 겹쳐서 쌓인다(§7 결정) — 각자 자기
+            타임아웃(LobbyPage의 INK_EFFECT_MS)에 맞춰 개별적으로 사라진다. */}
+        {inkEffects.map((effect) => (
+          <div
+            key={effect.id}
+            className="ink-blot"
+            style={{
+              '--blot-x': `${hashToPercent(effect.id)}%`,
+              '--blot-y': `${hashToPercent(`${effect.id}y`)}%`,
+              '--blot-rotate': `${hashToPercent(`${effect.id}r`) - 45}deg`,
+            } as CSSProperties}
+            aria-hidden="true"
+          />
+        ))}
       </div>
+
+      {/* 상대가 맞힌 alert 아이템 — 여러 개 겹쳐 쌓이고, 전부 닫아야(또는 각자
+          타임아웃 지나야) 입력창이 다시 활성화된다(§7 결정). */}
+      {alerts.map((alert, index) => (
+        <div
+          key={alert.id}
+          className="item-alert-overlay"
+          style={{ '--stack-index': index } as CSSProperties}
+        >
+          <div className="item-alert-modal">
+            <span className="item-alert-icon" aria-hidden="true">
+              ⚠️
+            </span>
+            <p>상대가 방해 아이템을 사용했습니다!</p>
+            <button type="button" className="btn-primary" onClick={() => onDismissAlert(alert.id)}>
+              확인
+            </button>
+          </div>
+        </div>
+      ))}
 
       {Object.entries(returningBees).map(([id, bee]) => (
         <span
@@ -368,6 +465,7 @@ function GameScreen({
             value={input}
             onChange={handleInputChange}
             placeholder="화면의 코드를 그대로 입력 후 Enter"
+            disabled={alerts.length > 0}
             autoFocus
           />
           <span ref={measureRef} className="input-measure" aria-hidden="true" />
@@ -392,7 +490,7 @@ function GameScreen({
         </button>
       </form>
 
-      <button type="button" className="btn-link" onClick={onForfeit}>
+      <button type="button" className="btn-link forfeit-btn" onClick={onForfeit}>
         게임 포기하기
       </button>
     </div>

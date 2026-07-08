@@ -1,0 +1,138 @@
+.promotion-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+
+.promotion-icons {
+  position: relative;
+  width: 72px;
+  height: 44px;
+}
+
+.promotion-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.promotion-icon .tier-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.promotion-icon-out {
+  animation: promo-icon-out 700ms ease-in both;
+}
+
+@keyframes promo-icon-out {
+  0% {
+    transform: translate(-50%, -50%) translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) translateX(-46px);
+    opacity: 0;
+  }
+}
+
+.promotion-icon-in {
+  opacity: 0;
+  animation: promo-icon-in 700ms cubic-bezier(0.2, 0.9, 0.3, 1.2) 500ms both;
+}
+
+@keyframes promo-icon-in {
+  0% {
+    transform: translate(-50%, -50%) translateX(46px);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 밝은 빛이 한 점으로 모였다가(0~35%) 순간적으로 터져 퍼진다(35~100%) */
+.promotion-burst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, var(--tier-color, var(--accent)) 45%, transparent 72%);
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  animation: promo-burst 700ms ease-out 300ms both;
+  pointer-events: none;
+}
+
+@keyframes promo-burst {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0;
+  }
+  35% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.95;
+  }
+  65% {
+    transform: translate(-50%, -50%) scale(4.5);
+    opacity: 0.65;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(7.5);
+    opacity: 0;
+  }
+}
+
+.promotion-text {
+  margin: 0;
+  font-family: var(--pixel-display);
+  font-size: 13px;
+  color: var(--tier-color, var(--accent));
+  text-shadow:
+    0 0 8px var(--tier-color, var(--accent-border)),
+    0 0 18px var(--tier-color, var(--accent-border));
+  opacity: 0;
+  animation: promo-text-in 400ms ease-out 750ms both;
+}
+
+@keyframes promo-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promotion-icon-out,
+  .promotion-icon-in,
+  .promotion-burst,
+  .promotion-text {
+    animation: none;
+  }
+
+  .promotion-icon-out {
+    display: none;
+  }
+
+  .promotion-icon-in,
+  .promotion-text {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(0);
+  }
+
+  .promotion-text {
+    transform: none;
+  }
+}

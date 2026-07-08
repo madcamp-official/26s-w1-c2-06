@@ -25,6 +25,34 @@
 - Python 3.x + venv
 - Node.js + npm
 
+## VM 상에서 코드 최신화 
+
+# 1. VM SSH 접속
+ssh <user>@<vm-ip>
+
+# 2. 앱 디렉터리로 이동, 최신 main 받기
+cd /opt/codebee
+git pull origin main
+
+# 3. 백엔드 — 의존성/마이그레이션/정적파일
+source .venv/bin/activate
+pip install -r requirements.txt          # 새 패키지 없으면 사실상 no-op
+python manage.py migrate                  # 0003_room_difficulty, 0004_profile_tier_... 포함
+python manage.py collectstatic --noinput  # WhiteNoise가 서빙할 정적파일 갱신
+
+# 4. 프론트엔드 빌드 (Django STATICFILES_DIRS로 연결된 산출물 갱신)
+cd frontend/codebee-frontend
+npm install                               # package.json 변경 있으면 반영
+npm run build
+cd /opt/codebee
+
+# 5. Django Channels 워커 재시작 (daphne, systemd)
+sudo systemctl restart codebee
+
+# 6. 확인
+sudo systemctl status codebee             # active (running) 확인
+sudo journalctl -u codebee -f             # 최근 로그로 에러 없는지 확인
+
 ## 실행 순서 (개발 시작할 때마다)
 
 **1. Postgres·Redis 띄우기** (레포 루트에서)

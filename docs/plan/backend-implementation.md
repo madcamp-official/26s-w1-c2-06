@@ -65,52 +65,46 @@ CHANNEL_LAYERS = {
 2. Docker 설치 → §1-1의 docker-compose.yml로 Postgres·Redis 컨테이너 실행
 3. Python/venv 설치 → 레포 클론 → .env에 운영용 DB/Redis 접속정보 설정
 4. 아래 systemd 유닛 등록 → Django Channels 워커를 상시 프로세스로 구동 (127.0.0.1:8000, 외부 노출 안 함)
-5. nginx 설치 → 아래 설정으로 80(/443)을 127.0.0.1:8000으로 리버스 프록시
-   (VM 방화벽이 22/80/443만 개방돼 있어 8000을 직접 열 수 없음 — architecture.md §3 참고)
-6. Cloudflare에서 캠프 도메인의 서브도메인을 신청하고, A 레코드를 VM 공인 IP로 연결
-   (Cloudflare 프록시 On 상태로 두면 HTTPS와 WebSocket 통과를 Cloudflare가 처리 — VM에 별도 인증서 설정 불필요)
+5. cloudflared 설치 → Cloudflare Zero Trust 대시보드에서 Tunnel 생성, Public Hostname의
+   Service를 http://localhost:8000(daphne 직결)으로 설정 → 아래 systemd 유닛으로 상시 구동
+   (Tunnel은 VM에서 Cloudflare 엣지로 아웃바운드 연결만 맺으므로 80/443 인바운드 개방이나
+   nginx 같은 리버스 프록시가 필요 없다 — 애초에 방화벽이 22/80/443만 열려 있어도 무관)
+6. 위 Tunnel의 Public Hostname에 캠프 도메인의 서브도메인을 연결
+   (Cloudflare가 TLS 종료 + WebSocket 통과까지 처리 — VM에 별도 인증서 설정 불필요)
 ```
 
 ```ini
-# /etc/systemd/system/codebee.service (배포 VM, 예시)
+# /etc/systemd/system/codebee.service (배포 VM, 실측: 2026-07-08)
 [Unit]
 Description=codebee Django Channels worker
 After=network.target docker.service
 
 [Service]
-WorkingDirectory=/opt/codebee
-ExecStart=/opt/codebee/.venv/bin/daphne -b 127.0.0.1 -p 8000 config.asgi:application
+WorkingDirectory=/root/codebee/backend
+ExecStart=/root/codebee/backend/venv/bin/daphne -b 127.0.0.1 -p 8000 config.asgi:application
 Restart=always
-EnvironmentFile=/opt/codebee/.env
+EnvironmentFile=/root/codebee/backend/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-```nginx
-# /etc/nginx/sites-available/codebee (배포 VM, 예시)
-server {
-    listen 80;
-    server_name <캠프-서브도메인>;
+```ini
+# /etc/systemd/system/cloudflared.service (배포 VM, 실측: 2026-07-08)
+[Unit]
+Description=cloudflared
 
-    location /ws/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-    }
+[Service]
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token <TUNNEL_TOKEN>
+Restart=always
 
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
+[Install]
+WantedBy=multi-user.target
 ```
 
-daphne는 `127.0.0.1`에만 바인딩(외부에서 8000으로 직접 접근 불가), nginx가 80을 받아 로컬로만 프록시한다. 정적 파일은 지금 설계대로 WhiteNoise가 daphne를 통해 서빙 — nginx는 그대로 통과만 시키고 별도로 서빙하지 않는다. 로컬 개발에서 이 구성을 미리 검증할 때는 `brew install nginx`로 동일한 설정을 테스트할 수 있다(맥 로컬 nginx는 `/opt/homebrew/etc/nginx/`).
+daphne는 `127.0.0.1`에만 바인딩(외부에서 8000으로 직접 접근 불가), `cloudflared`가 Cloudflare 엣지로부터 받은 요청을 로컬(`127.0.0.1:8000`)로 그대로 전달한다. 정적 파일은 지금 설계대로 WhiteNoise가 daphne를 통해 서빙 — Tunnel은 통과만 시키고 별도로 서빙하지 않는다. `<TUNNEL_TOKEN>`은 Cloudflare Zero Trust 대시보드에서 발급받는 값으로, 이 문서에는 절대 실제 값을 적지 않는다(유출 시 해당 터널로 임의 트래픽을 흘려보낼 수 있는 자격증명).
+
+**nginx는 이 배포에 관여하지 않는다.** VM에 nginx 패키지/설정 파일(`/etc/nginx/sites-enabled/codebee`)이 남아있을 수 있으나, `cloudflared`가 nginx(80)를 거치지 않고 daphne(8000)로 직결하므로 실제 요청 경로 밖이다 — 없어도 서비스에 영향 없음(2026-07-08, nginx access log에 실 트래픽이 안 찍히는 것으로 확인).
 
 Django 연결 설정은 §1-1의 `DATABASES`/`CHANNEL_LAYERS`와 동일하되, `HOST`가 `localhost`인 것만 유지하면 된다 (Postgres·Redis 컨테이너가 같은 VM에서 포트로 열려 있으므로).
 

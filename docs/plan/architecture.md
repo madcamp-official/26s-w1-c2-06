@@ -40,19 +40,19 @@
 | 환경 | 구성 |
 |---|---|
 | 로컬 개발 | Django Channels 워커 프로세스 여러 개(native) + Redis·Postgres(Docker) |
-| 배포 | VM(KCLOUD, 몰입캠프 제공) 위에 nginx(리버스 프록시) + Channels 워커 여러 개(native, systemd로 관리) + Postgres·Redis(같은 VM, Docker), 앞단은 Cloudflare(DNS/프록시, WebSocket 통과 가능) |
+| 배포 (2026-07-08 기준, 실측) | VM(KCLOUD, 몰입캠프 제공) 위에 Channels 워커 1개(daphne, native, systemd `codebee.service`) + Postgres·Redis(같은 VM, Docker), 앞단은 Cloudflare Tunnel(`cloudflared`, systemd)이 daphne(`127.0.0.1:8000`)로 직결 |
 
 [사용자]
     ↓
-[Cloudflare] ← DNS(캠프 도메인의 서브도메인, 무료 신청) + 프록시 + WebSocket 통과
-    ↓
+[Cloudflare 엣지] ← DNS + TLS 종료 + WebSocket 통과
+    ↓ (Cloudflare Tunnel — outbound-only, VM 인바운드 포트 불필요)
 [KCLOUD VM (한 대)]
-    ├── nginx (80/443 리버스 프록시 → 127.0.0.1:8000)
-    ├── Channels 워커 프로세스 여러 개 (systemd가 관리, 8000번 등 로컬 포트만 사용)
+    ├── cloudflared (systemd, `tunnel run --token ...` → 127.0.0.1:8000로 직결)
+    ├── Channels 워커 1개 (daphne, systemd `codebee.service`, 127.0.0.1:8000)
     ├── Postgres (Docker 컨테이너)
     └── Redis (Docker 컨테이너)
 
-**nginx가 앞단에 낀 이유**: KCLOUD VM 방화벽이 22/80/443만 개방돼 있고 임의 포트(8000 등)를 열 수 없다. daphne를 80/443에 직접 바인딩하는 방법도 있지만 특권 포트라 root 실행이 필요해 보안상 지양했다. 대신 nginx가 80(/443)을 받아서 로컬(`127.0.0.1:8000`)의 daphne로 프록시한다 — daphne는 그대로 비특권 유저로 실행. `/ws/` 경로는 `Upgrade`/`Connection: upgrade` 헤더를 그대로 넘겨줘야 WebSocket이 통과한다. 로컬 개발 환경(방화벽 제약 없음)에는 nginx가 필요 없다 — Vite가 8000으로 직접 프록시하는 지금 구조 그대로 유지.
+**nginx는 안 쓴다 (계획 변경, 실측 확인됨).** 원래 계획은 방화벽이 22/80/443만 열려 있다는 전제로 nginx를 리버스 프록시로 뒀지만, 실제 배포는 **Cloudflare Tunnel**을 썼다 — `cloudflared`가 VM에서 Cloudflare 엣지로 아웃바운드 연결만 맺고, 그 터널을 통해 들어온 요청을 로컬 포트로 그대로 전달한다. 아웃바운드 연결이라 VM 방화벽에 인바운드 포트를 전혀 열 필요가 없고(80/443조차), 그 결과 nginx가 있어야 할 이유(포트 우회)도 사라졌다. 터널의 forward 대상은 nginx(80)가 아니라 **daphne(8000) 직결**로 설정돼 있음을 실제 트래픽으로 확인함(`nginx access.log`에 요청이 안 찍힘). nginx 설정 파일(`/etc/nginx/sites-enabled/codebee`)은 VM에 남아있지만 현재 요청 경로에는 관여하지 않는다.
 
 **Render 대신 KCLOUD VM으로 결정** ([docs/research/deployment-hosting.md](../research/deployment-hosting.md) 참고). 이유는 두 가지: (1) 가상 머신을 직접 다뤄보는 경험 자체가 목적, (2) KCLOUD(카이스트 제공)와 서브도메인이 캠프 측에서 이미 무료로 제공되어, Render를 검토했던 원래 이유(비용 $0)도 VM 방식에서 그대로 달성된다 — 그러면서 Render의 콜드스타트/Postgres 30일 만료/Redis 용량 제한 같은 트레이드오프도 없음.
 

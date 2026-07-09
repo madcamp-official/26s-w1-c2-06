@@ -13,7 +13,7 @@
 | 이름 | GitHub | 역할 |
 |---|---|---|
 | 박서윤 | [banunas](https://github.com/banunas) |  |
-| 박도현도현 | [dotori235](https://github.com/dotori235) |  |
+| 박도현 | [dotori235](https://github.com/dotori235) |  |
 
 ---
 
